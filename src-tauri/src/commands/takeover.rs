@@ -48,7 +48,7 @@ pub async fn operation_execute(
 ) -> Result<AnyOperationView, AppErrorView> {
     let deployment = runtime.deployment_service()?;
     let takeover = runtime.takeover_service()?;
-    runtime
+    let result = runtime
         .run_blocking(
             move || match deployment.operation_kind(&request.operation_id)? {
                 OperationKind::TakeOver => takeover
@@ -65,7 +65,13 @@ pub async fn operation_execute(
                 )),
             },
         )
-        .await?
+        .await?;
+    runtime.request_workspace_reconciliation(if result.is_ok() {
+        crate::scanner::ReconcileReason::OperationFinished
+    } else {
+        crate::scanner::ReconcileReason::OperationRolledBack
+    });
+    result
 }
 
 #[tauri::command]

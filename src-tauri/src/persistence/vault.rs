@@ -370,7 +370,7 @@ mod tests {
         for expected in first.paths.required_directories() {
             assert!(expected.is_dir(), "{}", expected.display());
         }
-        assert_eq!(first.database.settings().unwrap().schema_version, 3);
+        assert_eq!(first.database.settings().unwrap().schema_version, 5);
         drop(first);
 
         let second = OpenVault::open(&vault_path, &settings, &[]).unwrap();

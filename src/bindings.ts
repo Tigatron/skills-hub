@@ -60,6 +60,20 @@ async scanStart(request: ScanRequest) : Promise<Result<JobRef, AppErrorView>> {
 }
 },
 /**
+ * Starts independent read-only scans for every built-in global source.
+ */
+async scanAllGlobal() : Promise<Result<JobRef[], AppErrorView>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("scan_all_global") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async adaptersList() : Promise<AdapterDescriptorView[]> {
+    return await TAURI_INVOKE("adapters_list");
+},
+/**
  * Returns the authoritative state of one scan job.
  */
 async scanGet(jobId: string) : Promise<Result<ScanRunView, AppErrorView>> {
@@ -95,6 +109,38 @@ async libraryList(query: LibraryQuery) : Promise<Result<LibraryPage, AppErrorVie
 async targetRegisterFixture(request: RegisterTargetRequest) : Promise<Result<TargetView, AppErrorView>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("target_register_fixture", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async adaptersConfiguredList() : Promise<Result<ConfiguredAdapterView[], AppErrorView>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("adapters_configured_list") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async adapterConfigure(request: AdapterConfigureRequest) : Promise<Result<ConfiguredAdapterView, AppErrorView>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("adapter_configure", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async customTargetRegister(request: CustomTargetRegisterRequest) : Promise<Result<TargetView, AppErrorView>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("custom_target_register", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async adapterProjectTargetRegister(request: AdapterProjectTargetRegisterRequest) : Promise<Result<TargetView, AppErrorView>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("adapter_project_target_register", { request }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -227,52 +273,6 @@ async activityDetail(id: string) : Promise<Result<ActivityDetail, AppErrorView>>
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
-}
-}
-
-/** user-defined events **/
-
-
-export const events = __makeEvents__<{
-domainInvalidated: DomainInvalidated,
-scanProgress: ScanProgress
-}>({
-domainInvalidated: "domain-invalidated",
-scanProgress: "scan-progress"
-})
-
-/** user-defined constants **/
-
-
-
-/** user-defined types **/
-
-export type ActivityDetail = { item: ActivityItem; detailsJson: string; operation: ActivityOperationEvidence | null; scan: ActivityScanEvidence | null }
-export type ActivityItem = { id: string; kind: string; state: string; outcome: string | null; summary: string; startedAt: string; completedAt: string | null; operationId: string | null; scanRunId: string | null }
-export type ActivityOperationEvidence = { recoveryAvailable: boolean; errorCode: string | null; failedStep: number | null; planReference: string; journalReference: string; recoveryReferences: string[]; paths: ActivityPathEvidence[] }
-export type ActivityPathEvidence = { stepOrder: number; path: string; requestedMode: string | null; resolvedMode: string | null; stagePath: string | null; backupPath: string | null; rollbackPath: string | null }
-export type ActivityQuery = { kind: string | null; outcome: string | null; limit: number }
-export type ActivityScanEvidence = { diagnosticCount: number; errorCodes: string[] }
-export type AnyOperationView = { kind: "takeover"; value: OperationView } | { kind: "deployment"; value: DeploymentOperationView } | { kind: "batch_deployment"; value: BatchDeploymentOperationView }
-export type AppErrorCode = "internal" | "invalid_input" | "not_found" | "unsafe_path" | "unsupported_bundle" | "name_collision" | "stale_plan" | "operation_busy" | "cancelled" | "io_failure" | "database_failure" | "verification_failed" | "rolled_back" | "recovery_required"
-export type AppErrorView = { code: AppErrorCode; title: string; message: string; retryable: boolean; recoveryAction: string | null }
-export type BatchDeploymentOperationView = { operationId: string; planDigest: string; state: string; outcome: string | null; failure: string | null; recovery: string[]; review: BatchDeploymentPlanView; replayed: boolean }
-export type BatchDeploymentPlanRequest = { skillId: string; targets: BatchDeploymentTargetChoice[] }
-export type BatchDeploymentPlanView = { operationId: string; planDigest: string; expiresAt: string; action: string; skillId: string; entries: DeploymentPlanView[]; recoveryCount: number; consequence: string }
-export type BatchDeploymentTargetChoice = { targetId: string; requestedMode: DeploymentModeDto | null }
-export type BootstrapState = { appName: string; appVersion: string; bundleIdentifier: string; contractVersion: number; implementationStage: string; vaultInitialized: boolean; vaultPath: string | null; runtimeStatus: RuntimeStatus; blockingWorkerLimit: number; platform: PlatformSummary }
-export type CancelResult = { jobId: string; accepted: boolean }
-export type DeploymentHealthView = { deploymentId: string; skillId: string; targetId: string; deploymentName: string; targetPath: string; mode: DeploymentModeDto; active: boolean; health: string; explanation: string; expectedDigest: string; vaultDigest: string | null; targetDigest: string | null; expectedLinkTarget: string | null; actualLinkTarget: string | null; driftDirection: string; allowedActions: string[]; disabledReason: string | null; verifiedAt: string }
-export type DeploymentIdRequest = { deploymentId: string }
-export type DeploymentModeDto = "symlink" | "managed_copy"
-export type DeploymentOperationView = { operationId: string; planDigest: string; state: string; outcome: string | null; failure: string | null; recovery: string[]; review: DeploymentPlanView; replayed: boolean }
-export type DeploymentPage = { items: DeploymentHealthView[]; count: number }
-export type DeploymentPlanRequest = { skillId: string; targetId: string; requestedMode: DeploymentModeDto | null }
-export type DeploymentPlanView = { operationId: string; planDigest: string; expiresAt: string; action: string; skillId: string; targetId: string; deploymentId: string; targetPath: string; requestedMode: DeploymentModeDto; resolvedMode: DeploymentModeDto; fallbackReason: string | null; reviewedHealth: string; noOp: boolean; consequence: string; recoveryCount: number; executionAllowed: boolean }
-export type DeploymentQuery = { skillId: string | null; targetId: string | null; includeInactive: boolean; limit: number }
-export type DomainInvalidated = { revision: number; scopes: string[]; ids: string[] }
-export type DuplicateSummary = { exactDuplicateLocations: number; nameConflicts: number; probableDuplicatesOrRenames: number; unverified: boolean }
-export type ExecuteOperationRequest = { operationId: string; planDigest: string }
 },
 async vaultReconcileWorking(request: SkillLifecycleRequest) : Promise<Result<ReconcileResult, AppErrorView>> {
     try {
@@ -457,7 +457,68 @@ async manualProjectRescan(request: ManualProjectIdRequest) : Promise<Result<Work
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+}
+}
+
+/** user-defined events **/
+
+
+export const events = __makeEvents__<{
+domainInvalidated: DomainInvalidated,
+scanProgress: ScanProgress,
+workspaceProjectBatchEvent: WorkspaceProjectBatchEvent
+}>({
+domainInvalidated: "domain-invalidated",
+scanProgress: "scan-progress",
+workspaceProjectBatchEvent: "workspace-project-batch-event"
+})
+
+/** user-defined constants **/
+
+
+
+/** user-defined types **/
+
+export type ActivityDetail = { item: ActivityItem; detailsJson: string; operation: ActivityOperationEvidence | null; scan: ActivityScanEvidence | null }
+export type ActivityItem = { id: string; kind: string; state: string; outcome: string | null; summary: string; startedAt: string; completedAt: string | null; operationId: string | null; scanRunId: string | null }
+export type ActivityOperationEvidence = { recoveryAvailable: boolean; errorCode: string | null; failedStep: number | null; planReference: string; journalReference: string; recoveryReferences: string[]; paths: ActivityPathEvidence[] }
+export type ActivityPathEvidence = { stepOrder: number; path: string; requestedMode: string | null; resolvedMode: string | null; stagePath: string | null; backupPath: string | null; rollbackPath: string | null }
+export type ActivityQuery = { kind: string | null; outcome: string | null; limit: number }
+export type ActivityScanEvidence = { diagnosticCount: number; errorCodes: string[] }
+export type AdapterConfigureRequest = { adapterId: string; enabled: boolean; globalOverridePath: string | null; projectOverridePath: string | null }
+export type AdapterDescriptorView = { adapterId: string; displayName: string; platform: string; globalPath: string; projectPath: string; scopes: AdapterScope[]; supportedModes: AdapterMode[]; officialSourceUrl: string; verifiedAt: string; confidence: string; caveats: string }
+export type AdapterMode = "symlink" | "managed_copy"
+export type AdapterProjectTargetRegisterRequest = { adapterId: string; projectId: string }
+export type AdapterScope = "global" | "project"
+export type AnyOperationView = { kind: "takeover"; value: OperationView } | { kind: "deployment"; value: DeploymentOperationView } | { kind: "batch_deployment"; value: BatchDeploymentOperationView }
+export type AppErrorCode = "internal" | "invalid_input" | "not_found" | "unsafe_path" | "unsupported_bundle" | "name_collision" | "stale_plan" | "operation_busy" | "cancelled" | "io_failure" | "database_failure" | "verification_failed" | "rolled_back" | "recovery_required"
+export type AppErrorView = { code: AppErrorCode; title: string; message: string; retryable: boolean; recoveryAction: string | null }
+export type BatchDeploymentOperationView = { operationId: string; planDigest: string; state: string; outcome: string | null; failure: string | null; recovery: string[]; review: BatchDeploymentPlanView; replayed: boolean }
+export type BatchDeploymentPlanRequest = { skillId: string; targets: BatchDeploymentTargetChoice[] }
+export type BatchDeploymentPlanView = { operationId: string; planDigest: string; expiresAt: string; action: string; skillId: string; entries: DeploymentPlanView[]; recoveryCount: number; consequence: string }
+export type BatchDeploymentTargetChoice = { targetId: string; requestedMode: DeploymentModeDto | null }
+export type BootstrapState = { appName: string; appVersion: string; bundleIdentifier: string; contractVersion: number; implementationStage: string; vaultInitialized: boolean; vaultPath: string | null; runtimeStatus: RuntimeStatus; blockingWorkerLimit: number; platform: PlatformSummary }
+export type CancelResult = { jobId: string; accepted: boolean }
+export type CapabilityStatus = "supported" | "unsupported" | "unknown"
+export type ConfiguredAdapterView = { adapterId: string; displayName: string; enabled: boolean; globalOverridePath: string | null; projectOverridePath: string | null }
+export type CustomTargetRegisterRequest = { targetId: string | null; displayName: string; selectedDirectory: string; scope: CustomTargetScope; preferredMode: DeploymentModeDto; projectId: string | null }
+export type CustomTargetScope = "global" | "project"
+export type DeploymentHealthView = { deploymentId: string; skillId: string; targetId: string; deploymentName: string; targetPath: string; mode: DeploymentModeDto; active: boolean; health: string; explanation: string; expectedDigest: string; vaultDigest: string | null; targetDigest: string | null; expectedLinkTarget: string | null; actualLinkTarget: string | null; driftDirection: string; allowedActions: string[]; disabledReason: string | null; verifiedAt: string }
+export type DeploymentIdRequest = { deploymentId: string }
+export type DeploymentModeDto = "symlink" | "managed_copy"
+export type DeploymentOperationView = { operationId: string; planDigest: string; state: string; outcome: string | null; failure: string | null; recovery: string[]; review: DeploymentPlanView; replayed: boolean }
+export type DeploymentPage = { items: DeploymentHealthView[]; count: number }
+export type DeploymentPlanRequest = { skillId: string; targetId: string; requestedMode: DeploymentModeDto | null }
+export type DeploymentPlanView = { operationId: string; planDigest: string; expiresAt: string; action: string; skillId: string; targetId: string; deploymentId: string; targetPath: string; requestedMode: DeploymentModeDto; resolvedMode: DeploymentModeDto; fallbackReason: string | null; reviewedHealth: string; noOp: boolean; consequence: string; recoveryCount: number; executionAllowed: boolean }
+export type DeploymentQuery = { skillId: string | null; targetId: string | null; includeInactive: boolean; limit: number }
+export type DestinationCapabilityReport = { status: CapabilityStatus; writeFile: boolean; createDirectory: boolean; symlink: boolean; executableBit: boolean; atomicRename: boolean; fileFsync: boolean; directoryFsync: boolean; advisoryLock: boolean; caseSensitive: boolean; availableBytes: string | null; requiredBytes: string; blockers: string[] }
+export type DomainInvalidated = { revision: number; scopes: string[]; ids: string[] }
+export type DuplicateSummary = { exactDuplicateLocations: number; nameConflicts: number; probableDuplicatesOrRenames: number; unverified: boolean }
+export type ExecuteLifecycleRequest = { operationId: string; planDigest: string }
+export type ExecuteOperationRequest = { operationId: string; planDigest: string }
 export type FixtureTargetKindDto = "global" | "git_project" | "personal_project"
+export type IndexRebuildPlan = { operationId: string; planDigest: string; blockers: VaultVerifyIssue[]; skillManifestPaths: string[]; deploymentManifestPaths: string[]; operationJournalPaths: string[]; unresolvedOperationIds: string[] }
+export type IndexRebuildResult = { rebuiltSkills: number; rebuiltDeployments: number; rebuiltOperations: number; backupPath: string; restartRequired: boolean }
 export type InitializeVaultRequest = { selectedDirectory: string | null }
 export type JobRef = { jobId: string }
 export type KeepExternalRequest = { observationId: string }
@@ -471,12 +532,24 @@ export type LibraryOwnership = "external"
 export type LibraryPage = { items: LibraryItem[]; total: number; offset: number; limit: number }
 export type LibraryQuery = { offset: number; limit: number; search: string | null; filter: LibraryFilter }
 export type LibraryValidation = "verified" | "error"
+export type LifecycleRecoveryEvidence = { operationId: string; classification: string; blocking: boolean }
+export type ManualProjectAddRequest = { selectedPath: string }
+export type ManualProjectIdRequest = { projectId: string }
+export type ManualProjectView = { projectId: string; rootPath: string; canonicalPath: string; git: boolean }
+export type ObjectGcCandidate = { digest: string; exactPath: string; createdAt: string; retentionDeadline: string; pendingOwnerOperationId: string | null }
+export type ObjectGcPhase = "stage_pending_delete" | "delete_pending"
+export type ObjectGcPlan = { operationId: string; planDigest: string; phase: ObjectGcPhase; enabled: boolean; retentionDays: number; candidates: ObjectGcCandidate[]; blockers: string[]; referencedObjects: number; inspectedObjects: number }
+export type ObjectGcPlanRequest = { phase: ObjectGcPhase }
+export type ObjectGcResult = { operationId: string; phase: ObjectGcPhase; affectedObjects: number; evidencePath: string }
+export type ObjectGcSettingsSummary = { retentionDays: number; lastRun: string | null; eligible: boolean; nextRun: string | null; disabledReasons: string[] }
 export type ObservationEvidenceView = { observationId: string; path: string; canonicalPath: string | null; digest: string | null; status: string; error: string | null }
+export type OldVaultCleanupPlan = { operationId: string; planDigest: string; oldVaultPath: string; activeVaultPath: string; vaultId: string }
 export type OperationCancelResult = { operationId: string; cancellationRequested: boolean }
 export type OperationIdRequest = { operationId: string }
 export type OperationView = { operationId: string; planDigest: string; state: string; outcome: string | null; failure: string | null; recovery: string[]; context: TakeoverOperationContextView; review: TakeoverPlanView; replayed: boolean }
 export type PlatformSummary = { os: string; arch: string; minimumSupportedOs: string }
-export type RegisterTargetRequest = { kind: FixtureTargetKindDto; selectedDirectory: string }
+export type ReconcileResult = { skillId: string; workingPath: string; previousDigest: string; workingDigest: string; changed: boolean; deploymentsMarkedVaultAhead: number }
+export type RegisterTargetRequest = { kind: FixtureTargetKindDto; selectedDirectory: string; adapterId: string | null; isOverride: boolean | null }
 export type RuntimeStatus = "ready"
 export type ScanCoverageView = { state: string; complete: boolean; noFilesChanged: boolean }
 export type ScanDiagnosticView = { path: string; code: string; summary: string }
@@ -484,11 +557,12 @@ export type ScanProgress = { jobId: string; phase: string; completedEntries: num
 export type ScanRequest = { source: ScanSource }
 export type ScanRunState = "queued" | "running" | "completed" | "completed_with_errors" | "cancelled" | "failed"
 export type ScanRunView = { jobId: string; adapterId: string; sourceRootId: string; sourceName: string; displayRoot: string; state: ScanRunState; coverage: ScanCoverageView; completedEntries: number; estimatedEntries: number; observationCount: number; errorCount: number; errors: ScanDiagnosticView[]; startedAt: string; completedAt: string | null }
-export type ScanSource = "universal_global"
+export type ScanSource = "universal_global" | { configured_global: string }
 export type SelectedLocationRequest = { observationId: string; mode: DeploymentModeDto }
 export type SelectedReplacementView = { observationId: string; targetId: string; deploymentId: string; targetScope: string; path: string; requestedMode: DeploymentModeDto; resolvedMode: DeploymentModeDto; fallbackReason: string | null }
 export type SkillDetail = { skillId: string; displayName: string; deploymentName: string; workingPath: string; workingDigest: string; baselineDigest: string; ownership: string; lifecycle: string; sourcePaths: string[]; deploymentPaths: string[]; observationPaths: string[]; conflicts: string[]; allowedActions: string[] }
 export type SkillIdRequest = { skillId: string }
+export type SkillLifecycleRequest = { skillId: string }
 export type SkillPreviewRequest = { skillId: string; relativePath: string }
 export type StartupRecoveryEvidence = { operationId: string; status: string; outcome: string | null; error: string | null }
 export type StartupRecoveryReport = { completed: boolean; operations: StartupRecoveryEvidence[]; lifecycleOperations: LifecycleRecoveryEvidence[] }
@@ -500,8 +574,25 @@ export type TargetView = { targetId: string; adapterId: string; scope: string; p
 export type TextPreview = { skillId: string; relativePath: string; size: number; content: string }
 export type UndeployPlanRequest = { deploymentId: string; resolution: UndeployResolutionDto }
 export type UndeployResolutionDto = "remove_managed" | "preserve_target" | "cancel"
+export type VaultPathRequest = { path: string }
+export type VaultRelocatePlan = { operationId: string; planDigest: string; oldVaultPath: string; destinationPath: string; stagingPath: string; vaultId: string; capability: DestinationCapabilityReport }
+export type VaultRelocateResult = { operationId: string; oldVaultPath: string; activeVaultPath: string; rewrittenSymlinks: number; restartRequired: boolean; oldVaultRetained: boolean }
+export type VaultRepairAction = { kind: string; exactPath: string; reason: string; requiresReviewedOperation: boolean }
+export type VaultRepairPlan = { operationId: string; planDigest: string; writable: boolean; actions: VaultRepairAction[]; refused: VaultVerifyIssue[] }
 export type VaultStatusView = { initialized: boolean; rootPath: string | null; defaultPath: string; startupRecoveryCompleted: boolean | null }
 export type VaultSummary = { rootPath: string; initialized: boolean; vaultId: string }
+export type VaultVerifyIssue = { code: string; path: string; detail: string; repairable: boolean }
+export type VaultVerifyReport = { healthy: boolean; checkedSkills: number; checkedObjects: number; issues: VaultVerifyIssue[] }
+export type WorkspaceDiagnosticView = { path: string; code: string; summary: string }
+export type WorkspaceProjectBatchEvent = { rootId: string; projectRoot: string; projectKind: string; skillCount: number; errorCount: number; observations: WorkspaceProjectObservationView[]; diagnostics: WorkspaceDiagnosticView[]; batchComplete: boolean }
+export type WorkspaceProjectObservationView = { adapterId: string; displayPath: string; status: string }
+export type WorkspaceRemoveResult = { rootId: string; removed: boolean; noFilesChanged: boolean }
+export type WorkspaceRootAddRequest = { selectedPath: string; maximumDepth: number | null; ignoreRules: string[] }
+export type WorkspaceRootIdRequest = { rootId: string }
+export type WorkspaceRootPauseRequest = { rootId: string; paused: boolean }
+export type WorkspaceRootUpdateRequest = { rootId: string; selectedPath: string | null; maximumDepth: number | null; ignoreRules: string[] | null }
+export type WorkspaceRootView = { rootId: string; selectedPath: string; canonicalPath: string; enabled: boolean; paused: boolean; maximumDepth: number; ignoreRules: string[]; coverageState: string; lastAttempt: string | null; lastSuccessfulCompleteScan: string | null; projectCount: number; skillCount: number; errorCount: number; errors: WorkspaceDiagnosticView[]; noFilesChanged: boolean }
+export type WorkspaceScanResultView = { rootId: string; coverageState: string; complete: boolean; projectCount: number; skillCount: number; errorCount: number; streamedProjectBatches: number; noFilesChanged: boolean }
 
 /** tauri-specta globals **/
 
@@ -511,14 +602,10 @@ import {
 } from "@tauri-apps/api/core";
 import * as TAURI_API_EVENT from "@tauri-apps/api/event";
 import { type WebviewWindow as __WebviewWindow__ } from "@tauri-apps/api/webviewWindow";
-export type DestinationCapabilityReport = { status: CapabilityStatus; writeFile: boolean; createDirectory: boolean; symlink: boolean; executableBit: boolean; atomicRename: boolean; fileFsync: boolean; directoryFsync: boolean; advisoryLock: boolean; caseSensitive: boolean; availableBytes: string | null; requiredBytes: string; blockers: string[] }
 
 type __EventObj__<T> = {
-export type ExecuteLifecycleRequest = { operationId: string; planDigest: string }
 	listen: (
 		cb: TAURI_API_EVENT.EventCallback<T>,
-export type IndexRebuildPlan = { operationId: string; planDigest: string; blockers: VaultVerifyIssue[]; skillManifestPaths: string[]; deploymentManifestPaths: string[]; operationJournalPaths: string[]; unresolvedOperationIds: string[] }
-export type IndexRebuildResult = { rebuiltSkills: number; rebuiltDeployments: number; rebuiltOperations: number; backupPath: string; restartRequired: boolean }
 	) => ReturnType<typeof TAURI_API_EVENT.listen<T>>;
 	once: (
 		cb: TAURI_API_EVENT.EventCallback<T>,
@@ -532,18 +619,7 @@ export type Result<T, E> =
 	| { status: "ok"; data: T }
 	| { status: "error"; error: E };
 
-export type LifecycleRecoveryEvidence = { operationId: string; classification: string; blocking: boolean }
-export type ManualProjectAddRequest = { selectedPath: string }
-export type ManualProjectIdRequest = { projectId: string }
-export type ManualProjectView = { projectId: string; rootPath: string; canonicalPath: string; git: boolean }
-export type ObjectGcCandidate = { digest: string; exactPath: string; createdAt: string; retentionDeadline: string; pendingOwnerOperationId: string | null }
-export type ObjectGcPhase = "stage_pending_delete" | "delete_pending"
-export type ObjectGcPlan = { operationId: string; planDigest: string; phase: ObjectGcPhase; enabled: boolean; retentionDays: number; candidates: ObjectGcCandidate[]; blockers: string[]; referencedObjects: number; inspectedObjects: number }
-export type ObjectGcPlanRequest = { phase: ObjectGcPhase }
-export type ObjectGcResult = { operationId: string; phase: ObjectGcPhase; affectedObjects: number; evidencePath: string }
-export type ObjectGcSettingsSummary = { retentionDays: number; lastRun: string | null; eligible: boolean; nextRun: string | null; disabledReasons: string[] }
 function __makeEvents__<T extends Record<string, any>>(
-export type OldVaultCleanupPlan = { operationId: string; planDigest: string; oldVaultPath: string; activeVaultPath: string; vaultId: string }
 	mappings: Record<keyof T, string>,
 ) {
 	return new Proxy(
@@ -562,7 +638,6 @@ export type OldVaultCleanupPlan = { operationId: string; planDigest: string; old
 						once: (arg: any) => window.once(name, arg),
 						emit: (arg: any) => window.emit(name, arg),
 					}),
-export type SkillLifecycleRequest = { skillId: string }
 					get: (_, command: keyof __EventObj__<any>) => {
 						switch (command) {
 							case "listen":
@@ -574,24 +649,7 @@ export type SkillLifecycleRequest = { skillId: string }
 						}
 					},
 				});
-export type VaultPathRequest = { path: string }
-export type VaultRelocatePlan = { operationId: string; planDigest: string; oldVaultPath: string; destinationPath: string; stagingPath: string; vaultId: string; capability: DestinationCapabilityReport }
-export type VaultRelocateResult = { operationId: string; oldVaultPath: string; activeVaultPath: string; rewrittenSymlinks: number; restartRequired: boolean; oldVaultRetained: boolean }
-export type VaultRepairAction = { kind: string; exactPath: string; reason: string; requiresReviewedOperation: boolean }
-export type VaultRepairPlan = { operationId: string; planDigest: string; writable: boolean; actions: VaultRepairAction[]; refused: VaultVerifyIssue[] }
 			},
 		},
-export type VaultVerifyIssue = { code: string; path: string; detail: string; repairable: boolean }
-export type VaultVerifyReport = { healthy: boolean; checkedSkills: number; checkedObjects: number; issues: VaultVerifyIssue[] }
-export type WorkspaceDiagnosticView = { path: string; code: string; summary: string }
-export type WorkspaceProjectBatchEvent = { rootId: string; projectRoot: string; projectKind: string; skillCount: number; errorCount: number; observations: WorkspaceProjectObservationView[]; diagnostics: WorkspaceDiagnosticView[]; batchComplete: boolean }
-export type WorkspaceProjectObservationView = { adapterId: string; displayPath: string; status: string }
-export type WorkspaceRemoveResult = { rootId: string; removed: boolean; noFilesChanged: boolean }
-export type WorkspaceRootAddRequest = { selectedPath: string; maximumDepth: number | null; ignoreRules: string[] }
-export type WorkspaceRootIdRequest = { rootId: string }
-export type WorkspaceRootPauseRequest = { rootId: string; paused: boolean }
-export type WorkspaceRootUpdateRequest = { rootId: string; selectedPath: string | null; maximumDepth: number | null; ignoreRules: string[] | null }
-export type WorkspaceRootView = { rootId: string; selectedPath: string; canonicalPath: string; enabled: boolean; paused: boolean; maximumDepth: number; ignoreRules: string[]; coverageState: string; lastAttempt: string | null; lastSuccessfulCompleteScan: string | null; projectCount: number; skillCount: number; errorCount: number; errors: WorkspaceDiagnosticView[]; noFilesChanged: boolean }
-export type WorkspaceScanResultView = { rootId: string; coverageState: string; complete: boolean; projectCount: number; skillCount: number; errorCount: number; streamedProjectBatches: number; noFilesChanged: boolean }
 	);
 }

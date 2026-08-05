@@ -317,6 +317,229 @@ impl Repositories {
         Ok(())
     }
 
+    /// Atomically persists a Workspace Root and the filesystem identity the user authorized.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when values cannot be projected or the transaction fails.
+    pub fn upsert_workspace_root_authorization(
+        &self,
+        record: WorkspaceRootRecord,
+        identity: AuthorizationIdentityRecord,
+    ) -> Result<(), RepositoryError> {
+        let selected_path = path_text(&record.selected_path)?;
+        let canonical_path = path_text(&record.canonical_path)?;
+        let ignores = json_text(&record.ignore_rules)?;
+        let maximum_depth =
+            i64::try_from(record.maximum_depth).map_err(|_| RepositoryError::IntegerOverflow)?;
+        let created_at = millis(record.created_at)?;
+        let updated_at = millis(record.updated_at)?;
+        self.database.execute(move |connection| {
+            let transaction = connection.transaction()?;
+            transaction.execute(
+                "INSERT INTO workspace_roots(
+                    id, selected_path, canonical_path, paused, maximum_depth,
+                    ignore_rules_json, scan_status, created_at_ms, updated_at_ms
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                 ON CONFLICT(id) DO UPDATE SET
+                    selected_path = excluded.selected_path,
+                    canonical_path = excluded.canonical_path,
+                    paused = excluded.paused,
+                    maximum_depth = excluded.maximum_depth,
+                    ignore_rules_json = excluded.ignore_rules_json,
+                    scan_status = excluded.scan_status,
+                    updated_at_ms = excluded.updated_at_ms",
+                params![
+                    record.id.to_string(),
+                    selected_path,
+                    canonical_path,
+                    record.paused,
+                    maximum_depth,
+                    ignores,
+                    record.scan_status,
+                    created_at,
+                    updated_at
+                ],
+            )?;
+            transaction.execute(
+                "INSERT INTO workspace_root_identities(workspace_root_id, device_id, file_id)
+                 VALUES (?1, ?2, ?3)
+                 ON CONFLICT(workspace_root_id) DO UPDATE SET
+                    device_id = excluded.device_id, file_id = excluded.file_id",
+                params![
+                    record.id.to_string(),
+                    identity.device_id.to_string(),
+                    identity.file_id.to_string()
+                ],
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })?;
+        Ok(())
+    }
+
+    /// Returns one Workspace Root by its stable authorization identifier.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the database is unavailable or persisted data is invalid.
+    pub fn workspace_root(
+        &self,
+        id: WorkspaceRootId,
+    ) -> Result<Option<WorkspaceRootRecord>, RepositoryError> {
+        self.database
+            .execute(move |connection| {
+                connection
+                    .query_row(
+                        "SELECT selected_path, canonical_path, paused, maximum_depth,
+                                ignore_rules_json, scan_status, created_at_ms, updated_at_ms
+                         FROM workspace_roots WHERE id = ?1",
+                        [id.to_string()],
+                        |row| workspace_root_from_row(id, row),
+                    )
+                    .optional()
+                    .map_err(DbExecutorError::Sqlite)
+            })
+            .map_err(RepositoryError::Database)
+    }
+
+    /// Persists the selected directory's stable filesystem identity.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the database write fails.
+    pub fn set_workspace_root_identity(
+        &self,
+        id: WorkspaceRootId,
+        identity: AuthorizationIdentityRecord,
+    ) -> Result<(), RepositoryError> {
+        self.database.execute(move |connection| {
+            connection.execute(
+                "INSERT INTO workspace_root_identities(workspace_root_id, device_id, file_id)
+                 VALUES (?1, ?2, ?3)
+                 ON CONFLICT(workspace_root_id) DO UPDATE SET
+                    device_id = excluded.device_id, file_id = excluded.file_id",
+                params![
+                    id.to_string(),
+                    identity.device_id.to_string(),
+                    identity.file_id.to_string()
+                ],
+            )?;
+            Ok(())
+        })?;
+        Ok(())
+    }
+
+    /// Returns the filesystem identity authorized for a Workspace Root.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the database read or integer projection fails.
+    pub fn workspace_root_identity(
+        &self,
+        id: WorkspaceRootId,
+    ) -> Result<Option<AuthorizationIdentityRecord>, RepositoryError> {
+        self.database
+            .execute(move |connection| {
+                connection
+                    .query_row(
+                        "SELECT device_id, file_id FROM workspace_root_identities
+                 WHERE workspace_root_id = ?1",
+                        [id.to_string()],
+                        authorization_identity_from_row,
+                    )
+                    .optional()
+                    .map_err(DbExecutorError::Sqlite)
+            })
+            .map_err(RepositoryError::Database)
+    }
+
+    /// Returns every authorized Workspace Root in stable path order.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the database is unavailable or persisted data is invalid.
+    pub fn workspace_roots(&self) -> Result<Vec<WorkspaceRootRecord>, RepositoryError> {
+        self.database
+            .execute(|connection| {
+                let mut statement = connection.prepare(
+                    "SELECT id, selected_path, canonical_path, paused, maximum_depth,
+                            ignore_rules_json, scan_status, created_at_ms, updated_at_ms
+                     FROM workspace_roots ORDER BY canonical_path, id",
+                )?;
+                statement
+                    .query_map([], |row| {
+                        let id = parse_text(&row.get::<_, String>(0)?, 0)?;
+                        workspace_root_from_row_offset(id, row, 1)
+                    })?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(DbExecutorError::Sqlite)
+            })
+            .map_err(RepositoryError::Database)
+    }
+
+    /// Removes one authorization boundary and its derived discovery/coverage projection.
+    /// User content is never touched.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the database transaction fails.
+    pub fn remove_workspace_root(&self, id: WorkspaceRootId) -> Result<bool, RepositoryError> {
+        self.database
+            .execute(move |connection| {
+                let transaction = connection.transaction()?;
+                let id = id.to_string();
+                transaction.execute(
+                    "UPDATE observations
+                     SET source_root_kind = 'manual_project', source_root_id = project_id
+                     WHERE source_root_kind = 'workspace_root' AND source_root_id = ?1
+                       AND project_id IN (SELECT id FROM projects WHERE manual = 1)",
+                    [&id],
+                )?;
+                transaction.execute(
+                    "DELETE FROM observations
+                 WHERE source_root_kind = 'workspace_root' AND source_root_id = ?1",
+                    [&id],
+                )?;
+                transaction.execute(
+                    "DELETE FROM projects WHERE workspace_root_id = ?1 AND manual = 0",
+                    [&id],
+                )?;
+                transaction.execute(
+                    "DELETE FROM scan_runs WHERE root_kind = 'workspace_root' AND root_id = ?1",
+                    [&id],
+                )?;
+                let removed =
+                    transaction.execute("DELETE FROM workspace_roots WHERE id = ?1", [&id])?;
+                transaction.commit()?;
+                Ok(removed > 0)
+            })
+            .map_err(RepositoryError::Database)
+    }
+
+    /// Transfers positive evidence for manual projects out of a Workspace coverage boundary.
+    /// This never marks evidence absent; a later complete scan owns that decision.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the database update fails.
+    pub fn rehome_workspace_manual_observations(
+        &self,
+        id: WorkspaceRootId,
+    ) -> Result<(), RepositoryError> {
+        self.database.execute(move |connection| {
+            connection.execute(
+                "UPDATE observations
+                 SET source_root_kind = 'manual_project', source_root_id = project_id
+                 WHERE source_root_kind = 'workspace_root' AND source_root_id = ?1
+                   AND project_id IN (SELECT id FROM projects WHERE manual = 1)",
+                [id.to_string()],
+            )?;
+            Ok(())
+        })?;
+        Ok(())
+    }
+
     /// # Errors
     ///
     /// Returns an error when values cannot be projected or the database write fails.
@@ -356,6 +579,64 @@ impl Repositories {
         Ok(())
     }
 
+    /// Atomically persists a manually authorized project and its filesystem identity.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when values cannot be projected or the transaction fails.
+    pub fn upsert_manual_project_authorization(
+        &self,
+        record: ProjectRecord,
+        identity: AuthorizationIdentityRecord,
+    ) -> Result<(), RepositoryError> {
+        let root_path = path_text(&record.root_path)?;
+        let canonical_path = path_text(&record.canonical_path)?;
+        let created_at = millis(record.created_at)?;
+        let updated_at = millis(record.updated_at)?;
+        self.database.execute(move |connection| {
+            let transaction = connection.transaction()?;
+            transaction.execute(
+                "INSERT INTO projects(
+                    id, workspace_root_id, root_path, canonical_path, discovery_evidence,
+                    git_classification, manual, created_at_ms, updated_at_ms
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                 ON CONFLICT(id) DO UPDATE SET
+                    workspace_root_id = excluded.workspace_root_id,
+                    root_path = excluded.root_path,
+                    canonical_path = excluded.canonical_path,
+                    discovery_evidence = excluded.discovery_evidence,
+                    git_classification = excluded.git_classification,
+                    manual = excluded.manual,
+                    updated_at_ms = excluded.updated_at_ms",
+                params![
+                    record.id.to_string(),
+                    record.workspace_root_id.map(|id| id.to_string()),
+                    root_path,
+                    canonical_path,
+                    record.discovery_evidence,
+                    record.git_classification,
+                    record.manual,
+                    created_at,
+                    updated_at
+                ],
+            )?;
+            transaction.execute(
+                "INSERT INTO manual_project_identities(project_id, device_id, file_id)
+                 VALUES (?1, ?2, ?3)
+                 ON CONFLICT(project_id) DO UPDATE SET
+                    device_id = excluded.device_id, file_id = excluded.file_id",
+                params![
+                    record.id.to_string(),
+                    identity.device_id.to_string(),
+                    identity.file_id.to_string()
+                ],
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })?;
+        Ok(())
+    }
+
     /// Returns a project by its stable identifier.
     ///
     /// # Errors
@@ -389,6 +670,61 @@ impl Repositories {
                     )
                     .optional()
                     .map_err(DbExecutorError::Sqlite)
+            })
+            .map_err(RepositoryError::Database)
+    }
+
+    /// Returns projects discovered beneath one Workspace Root plus manually registered projects.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when persisted project data cannot be projected.
+    pub fn workspace_projects(
+        &self,
+        workspace_root_id: WorkspaceRootId,
+    ) -> Result<Vec<ProjectRecord>, RepositoryError> {
+        self.database
+            .execute(move |connection| {
+                let mut statement = connection.prepare(
+                    "SELECT id, workspace_root_id, root_path, canonical_path, discovery_evidence,
+                        git_classification, manual, created_at_ms, updated_at_ms
+                 FROM projects
+                 WHERE workspace_root_id = ?1 OR manual = 1
+                 ORDER BY canonical_path, id",
+                )?;
+                statement
+                    .query_map([workspace_root_id.to_string()], |row| {
+                        let id = parse_text(&row.get::<_, String>(0)?, 0)?;
+                        project_from_row_offset(id, row, 1)
+                    })?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(DbExecutorError::Sqlite)
+            })
+            .map_err(RepositoryError::Database)
+    }
+
+    /// Returns a project with the same canonical filesystem identity, when indexed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the path cannot be encoded or the database read fails.
+    pub fn project_by_canonical_path(
+        &self,
+        canonical_path: &Path,
+    ) -> Result<Option<ProjectRecord>, RepositoryError> {
+        let canonical_path = path_text(canonical_path)?;
+        self.database
+            .execute(move |connection| {
+                connection.query_row(
+                "SELECT id, workspace_root_id, root_path, canonical_path, discovery_evidence,
+                        git_classification, manual, created_at_ms, updated_at_ms
+                 FROM projects WHERE canonical_path = ?1",
+                [canonical_path],
+                |row| {
+                    let id = parse_text(&row.get::<_, String>(0)?, 0)?;
+                    project_from_row_offset(id, row, 1)
+                },
+            ).optional().map_err(DbExecutorError::Sqlite)
             })
             .map_err(RepositoryError::Database)
     }
@@ -681,6 +1017,73 @@ impl Repositories {
         Ok(())
     }
 
+    /// Returns the latest durable coverage attempt and successful-complete timestamp for a
+    /// Workspace Root, including inspectable diagnostics from that latest attempt.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when persisted scan data cannot be projected.
+    pub fn workspace_coverage(
+        &self,
+        id: WorkspaceRootId,
+    ) -> Result<WorkspaceCoverageRecord, RepositoryError> {
+        self.database
+            .execute(move |connection| {
+                let root_id = id.to_string();
+                let latest = connection
+                    .query_row(
+                        "SELECT id, scope, state, coverage_json, started_at_ms, completed_at_ms
+                 FROM scan_runs
+                 WHERE root_kind = 'workspace_root' AND root_id = ?1
+                 ORDER BY started_at_ms DESC, id DESC LIMIT 1",
+                        [&root_id],
+                        |row| workspace_scan_run_from_row(&root_id, row),
+                    )
+                    .optional()?;
+                let last_successful_complete = connection
+                    .query_row(
+                        "SELECT completed_at_ms FROM scan_runs
+                 WHERE root_kind = 'workspace_root' AND root_id = ?1
+                   AND completed_at_ms IS NOT NULL
+                   AND json_extract(coverage_json, '$.complete') = 1
+                 ORDER BY completed_at_ms DESC LIMIT 1",
+                        [&root_id],
+                        |row| parse_millis(row.get(0)?, 0),
+                    )
+                    .optional()?;
+                let mut errors = Vec::new();
+                let mut total_errors = 0_u32;
+                if let Some(run) = &latest {
+                    total_errors = connection.query_row(
+                        "SELECT count(*) FROM scan_errors WHERE scan_run_id = ?1",
+                        [run.id.to_string()],
+                        |row| row.get(0),
+                    )?;
+                    let mut statement = connection.prepare(
+                        "SELECT path, error_code, summary FROM scan_errors
+                     WHERE scan_run_id = ?1 ORDER BY id LIMIT 50",
+                    )?;
+                    errors = statement
+                        .query_map([run.id.to_string()], |row| {
+                            Ok(ScanErrorRecord {
+                                scan_run_id: run.id,
+                                path: PathBuf::from(row.get::<_, String>(0)?),
+                                error_code: row.get(1)?,
+                                summary: row.get(2)?,
+                            })
+                        })?
+                        .collect::<Result<Vec<_>, _>>()?;
+                }
+                Ok(WorkspaceCoverageRecord {
+                    latest,
+                    last_successful_complete,
+                    errors,
+                    total_errors,
+                })
+            })
+            .map_err(RepositoryError::Database)
+    }
+
     /// # Errors
     ///
     /// Returns an error when values cannot be projected or the database write fails.
@@ -741,6 +1144,51 @@ impl Repositories {
                 observation_from_row_offset(id, row, 1)
             })?.collect::<Result<Vec<_>, _>>().map_err(DbExecutorError::Sqlite)
         }).map_err(RepositoryError::Database)
+    }
+
+    /// Counts active Skill observations currently attributed to one Workspace Root.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the database query fails or the count overflows.
+    pub fn workspace_observation_count(&self, id: WorkspaceRootId) -> Result<u32, RepositoryError> {
+        self.database
+            .execute(move |connection| {
+                connection
+                    .query_row(
+                        "SELECT count(*) FROM observations
+                 WHERE source_root_kind = 'workspace_root' AND source_root_id = ?1
+                   AND status <> 'stale'",
+                        [id.to_string()],
+                        |row| row.get::<_, u32>(0),
+                    )
+                    .map_err(DbExecutorError::Sqlite)
+            })
+            .map_err(RepositoryError::Database)
+    }
+
+    /// Counts projects owning at least one active Workspace observation.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the database query fails.
+    pub fn workspace_observed_project_count(
+        &self,
+        id: WorkspaceRootId,
+    ) -> Result<u32, RepositoryError> {
+        self.database
+            .execute(move |connection| {
+                connection
+                    .query_row(
+                        "SELECT count(DISTINCT project_id) FROM observations
+                         WHERE source_root_kind = 'workspace_root' AND source_root_id = ?1
+                           AND project_id IS NOT NULL AND status <> 'stale'",
+                        [id.to_string()],
+                        |row| row.get(0),
+                    )
+                    .map_err(DbExecutorError::Sqlite)
+            })
+            .map_err(RepositoryError::Database)
     }
 
     /// Returns all observations explicitly associated with a Skill.
@@ -1058,6 +1506,26 @@ impl Repositories {
             }).optional().map_err(DbExecutorError::Sqlite)
             })
             .map_err(RepositoryError::Database)
+    }
+
+    /// Returns every deployment without the interactive-list safety cap.
+    ///
+    /// Lifecycle integrity checks must never silently truncate their enumeration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the database is unavailable or a row is invalid.
+    pub fn all_deployments(&self) -> Result<Vec<DeploymentRecord>, RepositoryError> {
+        self.database.execute(|connection| {
+            let mut statement = connection.prepare(
+                "SELECT id, skill_id, target_id, deployment_name, target_path, mode, expected_digest,
+                        expected_link_target, health, adapter_version, active, last_verified_at_ms,
+                        last_operation_id, created_at_ms, updated_at_ms FROM deployments ORDER BY id")?;
+            statement.query_map([], |row| {
+                let id = parse_text(&row.get::<_, String>(0)?, 0)?;
+                deployment_from_row_with_id_offset(id, row, 1)
+            })?.collect::<Result<Vec<_>, _>>().map_err(DbExecutorError::Sqlite)
+        }).map_err(RepositoryError::Database)
     }
 
     /// Updates the persisted verification result for exactly one deployment.
@@ -1478,32 +1946,18 @@ pub struct WorkspaceRootRecord {
     pub id: WorkspaceRootId,
     pub selected_path: PathBuf,
     pub canonical_path: PathBuf,
-    /// Returns every deployment without the interactive-list safety cap.
-    ///
-    /// Lifecycle integrity checks must never silently truncate their enumeration.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the database is unavailable or a row is invalid.
-    pub fn all_deployments(&self) -> Result<Vec<DeploymentRecord>, RepositoryError> {
-        self.database.execute(|connection| {
-            let mut statement = connection.prepare(
-                "SELECT id, skill_id, target_id, deployment_name, target_path, mode, expected_digest,
-                        expected_link_target, health, adapter_version, active, last_verified_at_ms,
-                        last_operation_id, created_at_ms, updated_at_ms FROM deployments ORDER BY id")?;
-            statement.query_map([], |row| {
-                let id = parse_text(&row.get::<_, String>(0)?, 0)?;
-                deployment_from_row_with_id_offset(id, row, 1)
-            })?.collect::<Result<Vec<_>, _>>().map_err(DbExecutorError::Sqlite)
-        }).map_err(RepositoryError::Database)
-    }
-
     pub paused: bool,
     pub maximum_depth: usize,
     pub ignore_rules: Value,
     pub scan_status: String,
     pub created_at: UtcTimestamp,
     pub updated_at: UtcTimestamp,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AuthorizationIdentityRecord {
+    pub device_id: u64,
+    pub file_id: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -1534,6 +1988,29 @@ pub struct TargetRecord {
 }
 
 #[derive(Debug, Clone)]
+pub struct AdapterConfigurationRecord {
+    pub adapter_name: String,
+    pub adapter_id: AdapterId,
+    pub enabled: bool,
+    pub global_override_path: Option<PathBuf>,
+    pub project_override_path: Option<String>,
+    pub created_at: UtcTimestamp,
+    pub updated_at: UtcTimestamp,
+}
+
+#[derive(Debug, Clone)]
+pub struct TargetRegistrationMetadataRecord {
+    pub target_id: TargetId,
+    pub display_name: String,
+    pub preferred_mode: Option<DeploymentMode>,
+    pub root_device_id: u64,
+    pub root_file_id: u64,
+    pub override_kind: Option<String>,
+    pub created_at: UtcTimestamp,
+    pub updated_at: UtcTimestamp,
+}
+
+#[derive(Debug, Clone)]
 pub struct ScanRunRecord {
     pub id: ScanRunId,
     pub root_kind: String,
@@ -1551,6 +2028,14 @@ pub struct ScanErrorRecord {
     pub path: PathBuf,
     pub error_code: String,
     pub summary: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct WorkspaceCoverageRecord {
+    pub latest: Option<ScanRunRecord>,
+    pub last_successful_complete: Option<UtcTimestamp>,
+    pub errors: Vec<ScanErrorRecord>,
+    pub total_errors: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -2491,6 +2976,88 @@ fn parse_millis(value: i64, column: usize) -> rusqlite::Result<UtcTimestamp> {
 fn parse_deployment_name(value: &str, column: usize) -> rusqlite::Result<DeploymentName> {
     DeploymentName::parse(value).map_err(|source| {
         rusqlite::Error::FromSqlConversionFailure(column, Type::Text, Box::new(source))
+    })
+}
+
+fn workspace_root_from_row(
+    id: WorkspaceRootId,
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<WorkspaceRootRecord> {
+    workspace_root_from_row_offset(id, row, 0)
+}
+
+fn authorization_identity_from_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<AuthorizationIdentityRecord> {
+    Ok(AuthorizationIdentityRecord {
+        device_id: parse_text(&row.get::<_, String>(0)?, 0)?,
+        file_id: parse_text(&row.get::<_, String>(1)?, 1)?,
+    })
+}
+
+fn workspace_root_from_row_offset(
+    id: WorkspaceRootId,
+    row: &rusqlite::Row<'_>,
+    o: usize,
+) -> rusqlite::Result<WorkspaceRootRecord> {
+    let ignore_rules = row.get::<_, String>(o + 4)?;
+    Ok(WorkspaceRootRecord {
+        id,
+        selected_path: PathBuf::from(row.get::<_, String>(o)?),
+        canonical_path: PathBuf::from(row.get::<_, String>(o + 1)?),
+        paused: row.get(o + 2)?,
+        maximum_depth: usize::try_from(row.get::<_, i64>(o + 3)?).map_err(|source| {
+            rusqlite::Error::FromSqlConversionFailure(o + 3, Type::Integer, Box::new(source))
+        })?,
+        ignore_rules: serde_json::from_str(&ignore_rules).map_err(|source| {
+            rusqlite::Error::FromSqlConversionFailure(o + 4, Type::Text, Box::new(source))
+        })?,
+        scan_status: row.get(o + 5)?,
+        created_at: parse_millis(row.get(o + 6)?, o + 6)?,
+        updated_at: parse_millis(row.get(o + 7)?, o + 7)?,
+    })
+}
+
+fn project_from_row_offset(
+    id: ProjectId,
+    row: &rusqlite::Row<'_>,
+    o: usize,
+) -> rusqlite::Result<ProjectRecord> {
+    Ok(ProjectRecord {
+        id,
+        workspace_root_id: row
+            .get::<_, Option<String>>(o)?
+            .map(|value| parse_text(&value, o))
+            .transpose()?,
+        root_path: PathBuf::from(row.get::<_, String>(o + 1)?),
+        canonical_path: PathBuf::from(row.get::<_, String>(o + 2)?),
+        discovery_evidence: row.get(o + 3)?,
+        git_classification: row.get(o + 4)?,
+        manual: row.get(o + 5)?,
+        created_at: parse_millis(row.get(o + 6)?, o + 6)?,
+        updated_at: parse_millis(row.get(o + 7)?, o + 7)?,
+    })
+}
+
+fn workspace_scan_run_from_row(
+    root_id: &str,
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<ScanRunRecord> {
+    let coverage = row.get::<_, String>(3)?;
+    Ok(ScanRunRecord {
+        id: parse_text(&row.get::<_, String>(0)?, 0)?,
+        root_kind: "workspace_root".to_owned(),
+        root_id: Some(root_id.to_owned()),
+        scope: row.get(1)?,
+        state: row.get(2)?,
+        coverage: serde_json::from_str(&coverage).map_err(|source| {
+            rusqlite::Error::FromSqlConversionFailure(3, Type::Text, Box::new(source))
+        })?,
+        started_at: parse_millis(row.get(4)?, 4)?,
+        completed_at: row
+            .get::<_, Option<i64>>(5)?
+            .map(|value| parse_millis(value, 5))
+            .transpose()?,
     })
 }
 

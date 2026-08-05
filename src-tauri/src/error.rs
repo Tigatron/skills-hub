@@ -7,7 +7,7 @@ use thiserror::Error;
 use crate::{
     application::{
         activity::ActivityError, deployment::DeploymentError, scanning::ScanningServiceError,
-        takeover::TakeoverError,
+        takeover::TakeoverError, vault_lifecycle::LifecycleError, workspaces::WorkspaceError,
     },
     operations::OperationError,
     persistence::VaultError,
@@ -302,6 +302,13 @@ impl From<LifecycleError> for AppErrorView {
 impl From<ScanningServiceError> for AppErrorView {
     fn from(error: ScanningServiceError) -> Self {
         match error {
+            ScanningServiceError::UnknownSource => Self {
+                code: AppErrorCode::InvalidInput,
+                title: "Unknown scan source".to_owned(),
+                message: "Select a currently configured adapter source.".to_owned(),
+                retryable: false,
+                recovery_action: Some("review_adapters".to_owned()),
+            },
             ScanningServiceError::JobNotFound => Self {
                 code: AppErrorCode::NotFound,
                 title: "Scan not found".to_owned(),
@@ -340,6 +347,70 @@ impl From<ScanningServiceError> for AppErrorView {
                 retryable: true,
                 recovery_action: Some("retry".to_owned()),
             },
+        }
+    }
+}
+
+impl From<WorkspaceError> for AppErrorView {
+    fn from(error: WorkspaceError) -> Self {
+        match error {
+            WorkspaceError::InvalidRootId
+            | WorkspaceError::InvalidProjectId
+            | WorkspaceError::InvalidDepth
+            | WorkspaceError::PathNotAbsolute
+            | WorkspaceError::PathNotDirectory
+            | WorkspaceError::InvalidIgnoreProjection(_) => app_error(
+                AppErrorCode::InvalidInput,
+                "Invalid Workspace Root",
+                error.to_string(),
+                false,
+                Some("review_workspace_root"),
+            ),
+            WorkspaceError::RootMissing | WorkspaceError::ProjectMissing => app_error(
+                AppErrorCode::NotFound,
+                "Workspace Root not found",
+                error.to_string(),
+                false,
+                None,
+            ),
+            WorkspaceError::RootPaused => app_error(
+                AppErrorCode::InvalidInput,
+                "Workspace Root is paused",
+                error.to_string(),
+                false,
+                Some("resume_workspace_root"),
+            ),
+            WorkspaceError::VaultOverlap
+            | WorkspaceError::OverlappingRoot
+            | WorkspaceError::MissingIdentity
+            | WorkspaceError::UnsupportedPath => app_error(
+                AppErrorCode::UnsafePath,
+                "Unsafe Workspace Root",
+                error.to_string(),
+                false,
+                Some("choose_workspace_root"),
+            ),
+            WorkspaceError::ReadPath(_) => app_error(
+                AppErrorCode::IoFailure,
+                "Workspace Root unavailable",
+                error.to_string(),
+                true,
+                Some("retry"),
+            ),
+            WorkspaceError::Repository(_) => app_error(
+                AppErrorCode::DatabaseFailure,
+                "Workspace index unavailable",
+                error.to_string(),
+                true,
+                Some("retry"),
+            ),
+            WorkspaceError::StatePoisoned => app_error(
+                AppErrorCode::Internal,
+                "Workspace reconciliation unavailable",
+                error.to_string(),
+                true,
+                Some("restart_app"),
+            ),
         }
     }
 }

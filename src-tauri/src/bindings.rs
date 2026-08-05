@@ -53,11 +53,21 @@ pub(crate) fn builder() -> Builder<tauri::Wry> {
             crate::commands::vault_lifecycle::vault_relocate_plan,
             crate::commands::vault_lifecycle::vault_relocate_execute,
             crate::commands::vault_lifecycle::vault_old_cleanup_plan,
-            crate::commands::vault_lifecycle::vault_old_cleanup_execute
+            crate::commands::vault_lifecycle::vault_old_cleanup_execute,
+            crate::commands::workspaces::workspace_root_add,
+            crate::commands::workspaces::workspace_root_update,
+            crate::commands::workspaces::workspace_root_pause,
+            crate::commands::workspaces::workspace_root_remove,
+            crate::commands::workspaces::workspace_root_rescan,
+            crate::commands::workspaces::workspace_roots_list,
+            crate::commands::workspaces::manual_project_add,
+            crate::commands::workspaces::manual_projects_list,
+            crate::commands::workspaces::manual_project_rescan
         ])
         .events(collect_events![
             crate::application::scanning::ScanProgress,
-            crate::application::scanning::DomainInvalidated
+            crate::application::scanning::DomainInvalidated,
+            crate::application::workspaces::WorkspaceProjectBatchEvent
         ])
 }
 

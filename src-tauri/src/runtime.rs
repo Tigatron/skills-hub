@@ -1,10 +1,13 @@
 //! Long-lived runtime services managed by Tauri.
 
 use std::{
+    collections::BTreeSet,
     future::Future,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
-    sync::atomic::{AtomicBool, Ordering as AtomicOrdering},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 use serde::Serialize;
@@ -20,12 +23,14 @@ use crate::{
         scanning::{ScanJobs, ScanningService},
         takeover::TakeoverService,
         vault_lifecycle::{LifecycleRecoveryEvidence, VaultLifecycleService},
+        workspaces::WorkspaceService,
     },
     operations::{OperationCoordinator, OperationStore},
     persistence::{
         OpenVault, VaultError, default_application_support, default_vault_path,
         existing_device_settings,
     },
+    scanner::{NotifyBackend, ReconcileReason, WatchBackend, WatchCoordinator, WatchEvent},
 };
 
 const DEFAULT_BLOCKING_WORKER_LIMIT: u8 = 4;
@@ -35,22 +40,24 @@ pub struct AppRuntime {
     blocking_work: BlockingWorkPool,
     home: Option<PathBuf>,
     scan_jobs: ScanJobs,
+    watch_coordinator: Arc<Mutex<WatchCoordinator>>,
+    workspace_gate: Arc<Mutex<()>>,
     services: Arc<Mutex<Option<RuntimeServices>>>,
+    restart_required: Arc<AtomicBool>,
 }
 
 struct RuntimeServices {
     vault: Arc<OpenVault>,
+    coordinator: Arc<OperationCoordinator>,
     takeover: Arc<TakeoverService>,
     deployment: Arc<DeploymentService>,
     activity: Arc<ActivityService>,
     startup_recovery: Result<StartupRecoveryReport, String>,
 }
-    restart_required: Arc<AtomicBool>,
 
 impl AppRuntime {
     pub fn foundation() -> Self {
         let home = std::env::var_os("HOME").map(PathBuf::from);
-    coordinator: Arc<OperationCoordinator>,
         Self::foundation_for_home(home)
     }
 
@@ -61,13 +68,19 @@ impl AppRuntime {
             .filter(|path| path.is_absolute())
             .and_then(open_configured_vault);
         let services = active_vault.and_then(|vault| RuntimeServices::install(vault).ok());
-        Self {
+        let runtime = Self {
             blocking_work,
             home,
             scan_jobs: ScanJobs::default(),
+            watch_coordinator: Arc::new(Mutex::new(WatchCoordinator::default())),
+            workspace_gate: Arc::new(Mutex::new(())),
             services: Arc::new(Mutex::new(services)),
             restart_required: Arc::new(AtomicBool::new(false)),
+        };
+        if let Ok(service) = runtime.workspace_service() {
+            let _ = service.initialize_reconciliation();
         }
+        runtime
     }
 
     pub(crate) fn initialize_vault(
@@ -100,6 +113,11 @@ impl AppRuntime {
         )?))?;
         let summary = installed.summary();
         *services = Some(installed);
+        self.restart_required.store(false, Ordering::Release);
+        drop(services);
+        if let Ok(service) = self.workspace_service() {
+            let _ = service.initialize_reconciliation();
+        }
         Ok(summary)
     }
 
@@ -182,6 +200,107 @@ impl AppRuntime {
         ))
     }
 
+    pub(crate) fn workspace_service(&self) -> Result<WorkspaceService, RuntimeStateError> {
+        self.ensure_startup_recovery()?;
+        let services = self.services()?;
+        Ok(WorkspaceService::new(
+            services.vault.repositories.clone(),
+            services.vault.paths.root().to_path_buf(),
+            Arc::clone(&self.watch_coordinator),
+            Arc::clone(&self.workspace_gate),
+        ))
+    }
+
+    pub(crate) fn request_workspace_reconciliation(&self, reason: ReconcileReason) {
+        if let Ok(mut coordinator) = self.watch_coordinator.lock() {
+            coordinator.proactive(reason);
+        }
+    }
+
+    pub(crate) fn start_workspace_reconciliation(&self) {
+        let runtime = self.clone();
+        tauri::async_runtime::spawn(async move {
+            let mut backend = NotifyBackend::new().ok();
+            let mut watched = BTreeSet::new();
+            let mut ticks = 0_u16;
+            loop {
+                if backend.is_none() {
+                    backend = NotifyBackend::new().ok();
+                    watched.clear();
+                }
+                let boundaries = runtime
+                    .watch_coordinator
+                    .lock()
+                    .map(|coordinator| coordinator.boundaries())
+                    .unwrap_or_default();
+                let desired = boundaries.into_iter().collect::<BTreeSet<_>>();
+                if let Some(active) = backend.as_mut() {
+                    for removed in watched.difference(&desired).cloned().collect::<Vec<_>>() {
+                        let _ = active.unwatch(&removed);
+                        watched.remove(&removed);
+                    }
+                    for added in desired.difference(&watched).cloned().collect::<Vec<_>>() {
+                        if active.watch(&added).is_ok() {
+                            watched.insert(added);
+                        } else if let Ok(mut coordinator) = runtime.watch_coordinator.lock() {
+                            coordinator.ingest(WatchEvent::CoverageLost(added));
+                        }
+                    }
+                }
+
+                let mut disconnected = false;
+                if let Some(active) = backend.as_mut() {
+                    for _ in 0..1_024 {
+                        let Some(event) = active.try_event() else {
+                            break;
+                        };
+                        disconnected = event == WatchEvent::Disconnected;
+                        if let Ok(mut coordinator) = runtime.watch_coordinator.lock() {
+                            coordinator.ingest(event);
+                        }
+                        if disconnected {
+                            break;
+                        }
+                    }
+                }
+                if disconnected {
+                    backend = NotifyBackend::new().ok();
+                    watched.clear();
+                }
+
+                ticks = ticks.saturating_add(1);
+                if ticks >= 120 {
+                    runtime.request_workspace_reconciliation(ReconcileReason::Wake);
+                    ticks = 0;
+                }
+                let request = runtime
+                    .watch_coordinator
+                    .lock()
+                    .ok()
+                    .and_then(|mut coordinator| coordinator.drain());
+                if let Some(request) = request {
+                    let retry = match runtime.workspace_service() {
+                        Ok(service) => {
+                            let work_request = request.clone();
+                            match runtime
+                                .run_blocking(move || service.reconcile_request(work_request))
+                                .await
+                            {
+                                Ok(results) => results.iter().any(Result::is_err),
+                                Err(_) => true,
+                            }
+                        }
+                        Err(_) => true,
+                    };
+                    if retry && let Ok(mut coordinator) = runtime.watch_coordinator.lock() {
+                        coordinator.requeue(request);
+                    }
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            }
+        });
+    }
+
     pub(crate) fn startup_recovery_status(
         &self,
     ) -> Result<StartupRecoveryReport, RuntimeStateError> {
@@ -192,10 +311,17 @@ impl AppRuntime {
     }
 
     fn ensure_startup_recovery(&self) -> Result<(), RuntimeStateError> {
+        if self.restart_required.load(Ordering::Acquire) {
+            return Err(RuntimeStateError::RestartRequired);
+        }
         match &self.services()?.startup_recovery {
             Ok(report) if report.completed => Ok(()),
             Ok(_) | Err(_) => Err(RuntimeStateError::StartupRecoveryFailed),
         }
+    }
+
+    pub(crate) fn enter_restart_required(&self) {
+        self.restart_required.store(true, Ordering::Release);
     }
 
     fn services(&self) -> Result<RuntimeServicesSnapshot, RuntimeStateError> {
@@ -219,12 +345,13 @@ impl RuntimeServices {
         ));
         let deployment = Arc::new(DeploymentService::with_runtime(
             Arc::clone(&vault),
-            coordinator,
+            Arc::clone(&coordinator),
         ));
         let store = OperationStore::open(vault.paths.manager())?;
         let activity = Arc::new(ActivityService::new(vault.repositories.clone(), store));
         let mut services = Self {
             vault,
+            coordinator,
             takeover,
             deployment,
             activity,
@@ -237,6 +364,7 @@ impl RuntimeServices {
     fn snapshot(&self) -> RuntimeServicesSnapshot {
         RuntimeServicesSnapshot {
             vault: Arc::clone(&self.vault),
+            coordinator: Arc::clone(&self.coordinator),
             takeover: Arc::clone(&self.takeover),
             deployment: Arc::clone(&self.deployment),
             activity: Arc::clone(&self.activity),
@@ -253,6 +381,20 @@ impl RuntimeServices {
 
     fn run_startup_recovery(&self) -> Result<StartupRecoveryReport, String> {
         let vault = &self.vault;
+        let lifecycle = VaultLifecycleService::with_runtime(
+            Arc::clone(vault),
+            Arc::clone(&self.coordinator),
+            PathBuf::new(),
+        )
+        .recover_startup()
+        .map_err(|error| error.to_string())?;
+        if !lifecycle.completed {
+            return Ok(StartupRecoveryReport {
+                completed: false,
+                operations: Vec::new(),
+                lifecycle_operations: lifecycle.operations,
+            });
+        }
         let store =
             OperationStore::open(vault.paths.manager()).map_err(|error| error.to_string())?;
         let ids = store
@@ -309,6 +451,7 @@ impl RuntimeServices {
         Ok(StartupRecoveryReport {
             completed,
             operations,
+            lifecycle_operations: lifecycle.operations,
         })
     }
 }
@@ -316,6 +459,7 @@ impl RuntimeServices {
 #[derive(Clone)]
 struct RuntimeServicesSnapshot {
     vault: Arc<OpenVault>,
+    coordinator: Arc<OperationCoordinator>,
     takeover: Arc<TakeoverService>,
     deployment: Arc<DeploymentService>,
     activity: Arc<ActivityService>,
@@ -326,19 +470,12 @@ struct RuntimeServicesSnapshot {
 pub(crate) struct RuntimeVaultSummary {
     pub root_path: PathBuf,
     pub vault_id: String,
-        if self.restart_required.load(AtomicOrdering::Acquire) {
-            return Err(RuntimeStateError::RestartRequired);
-        }
 }
 
 pub(crate) struct RuntimeVaultStatus {
     pub summary: RuntimeVaultSummary,
     pub startup_recovery_completed: Option<bool>,
 }
-    pub(crate) fn enter_restart_required(&self) {
-        self.restart_required.store(true, AtomicOrdering::Release);
-    }
-
 
 #[derive(Debug, Error)]
 pub enum VaultInitializationError {
@@ -355,6 +492,7 @@ pub enum VaultInitializationError {
 pub struct StartupRecoveryReport {
     pub completed: bool,
     pub operations: Vec<StartupRecoveryEvidence>,
+    pub lifecycle_operations: Vec<LifecycleRecoveryEvidence>,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -396,20 +534,6 @@ impl BlockingWorkPool {
         Ok(result)
     }
 }
-        let lifecycle = VaultLifecycleService::with_runtime(
-            Arc::clone(vault),
-            Arc::clone(&self.coordinator),
-            PathBuf::new(),
-        )
-        .recover_startup()
-        .map_err(|error| error.to_string())?;
-        if !lifecycle.completed {
-            return Ok(StartupRecoveryReport {
-                completed: false,
-                operations: Vec::new(),
-                lifecycle_operations: lifecycle.operations,
-            });
-        }
 
 fn open_configured_vault(home: &Path) -> Option<Arc<OpenVault>> {
     let application_support = default_application_support(home);
@@ -448,6 +572,8 @@ pub enum RuntimeStateError {
     StatePoisoned,
     #[error("startup recovery could not establish authoritative operation state")]
     StartupRecoveryFailed,
+    #[error("Vault maintenance completed; restart is required before runtime services can be used")]
+    RestartRequired,
 }
 
 #[cfg(test)]
@@ -466,7 +592,6 @@ mod tests {
             runtime.blocking_worker_limit(),
             DEFAULT_BLOCKING_WORKER_LIMIT
         );
-            lifecycle_operations: lifecycle.operations,
     }
 
     #[test]
@@ -474,7 +599,6 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let runtime = AppRuntime::foundation_for_home(Some(home.path().to_path_buf()));
 
-    coordinator: Arc<OperationCoordinator>,
         assert!(runtime.vault_status().unwrap().is_none());
         assert!(matches!(
             runtime.scanning_service(),
@@ -507,7 +631,6 @@ mod tests {
             .unwrap_err()
             .into();
         assert!(matches!(relative.code, AppErrorCode::UnsafePath));
-    pub lifecycle_operations: Vec<LifecycleRecoveryEvidence>,
 
         let nested_runtime = AppRuntime::foundation_for_home(Some(home.path().to_path_buf()));
         let nested: AppErrorView = nested_runtime
@@ -530,6 +653,37 @@ mod tests {
             ))
         ));
     }
+
+    #[test]
+    fn restart_required_state_blocks_every_runtime_service() {
+        let home = tempfile::tempdir().unwrap();
+        let runtime = AppRuntime::foundation_for_home(Some(home.path().to_path_buf()));
+        runtime.initialize_vault(None).unwrap();
+        runtime.enter_restart_required();
+
+        assert!(matches!(
+            runtime.scanning_service(),
+            Err(RuntimeStateError::RestartRequired)
+        ));
+        assert!(matches!(
+            runtime.takeover_service(),
+            Err(RuntimeStateError::RestartRequired)
+        ));
+        assert!(matches!(
+            runtime.deployment_service(),
+            Err(RuntimeStateError::RestartRequired)
+        ));
+        assert!(matches!(
+            runtime.activity_service(),
+            Err(RuntimeStateError::RestartRequired)
+        ));
+        assert!(matches!(
+            runtime.vault_lifecycle_service(),
+            Err(RuntimeStateError::RestartRequired)
+        ));
+        assert!(matches!(
+            runtime.workspace_service(),
+            Err(RuntimeStateError::RestartRequired)
+        ));
+    }
 }
-    #[error("Vault maintenance completed; restart is required before runtime services can be used")]
-    RestartRequired,

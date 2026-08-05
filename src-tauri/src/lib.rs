@@ -39,8 +39,16 @@ pub fn run() {
         ))
         .manage(AppRuntime::foundation())
         .invoke_handler(specta.invoke_handler())
+        .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::Focused(true)) {
+                window
+                    .state::<AppRuntime>()
+                    .request_workspace_reconciliation(scanner::ReconcileReason::Resume);
+            }
+        })
         .setup(move |app| {
             specta.mount_events(app);
+            app.state::<AppRuntime>().start_workspace_reconciliation();
             Ok(())
         })
         .run(tauri::generate_context!())

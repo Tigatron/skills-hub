@@ -55,6 +55,12 @@ const MIGRATIONS: &[Migration] = &[
         sql: include_str!("migrations/0004_adapter_configurations.sql"),
         checksum: "34f4e62050954fef9cdcb2a86d23fae5769c69169ef669c561bd35f80c4bc3dd",
     },
+    Migration {
+        version: 5,
+        name: "workspace_authorization_identity",
+        sql: include_str!("migrations/0005_workspace_authorization_identity.sql"),
+        checksum: "7d35c45b3e797bf21e397cc415b593d4ef4acb67c285b1cfc232ec1e55834636",
+    },
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -374,17 +380,17 @@ mod tests {
         assert_eq!(settings.journal_mode.to_ascii_lowercase(), "wal");
         assert_eq!(settings.synchronous, 1);
         assert_eq!(settings.busy_timeout_millis, 5_000);
-        assert_eq!(settings.schema_version, 3);
+        assert_eq!(settings.schema_version, 5);
         drop(connection);
 
         let reopened = open_database(&path).unwrap();
-        assert_eq!(current_version(&reopened).unwrap(), 3);
+        assert_eq!(current_version(&reopened).unwrap(), 5);
         assert_eq!(
             reopened
                 .query_row("SELECT count(*) FROM schema_migrations", [], |row| row
                     .get::<_, u32>(0))
                 .unwrap(),
-            3
+            5
         );
     }
 
@@ -454,7 +460,7 @@ mod tests {
                 None,
             )
         );
-        assert_eq!(current_version(&connection).unwrap(), 3);
+        assert_eq!(current_version(&connection).unwrap(), 5);
     }
 
     #[test]
@@ -501,8 +507,10 @@ mod tests {
             MIGRATIONS[0],
             MIGRATIONS[1],
             MIGRATIONS[2],
+            MIGRATIONS[3],
+            MIGRATIONS[4],
             Migration {
-                version: 4,
+                version: 6,
                 name: "failing",
                 sql: THIRD_SQL,
                 checksum: Box::leak(third_checksum.into_boxed_str()),
@@ -524,13 +532,13 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
-        assert_eq!(current_version(&connection).unwrap(), 3);
+        assert_eq!(current_version(&connection).unwrap(), 5);
         assert!(fs::read_dir(directory.path()).unwrap().any(|entry| {
             entry
                 .unwrap()
                 .file_name()
                 .to_string_lossy()
-                .contains("pre-migration-v3")
+                .contains("pre-migration-v5")
         }));
     }
 
