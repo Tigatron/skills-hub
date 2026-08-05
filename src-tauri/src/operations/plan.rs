@@ -335,6 +335,32 @@ pub struct TakeoverObservationEvidence {
     pub entry_kind: EntryKind,
     pub metadata: Option<MetadataFingerprint>,
     pub raw_symlink_target: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub local_provenance: Vec<LocalProvenanceEvidence>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalProvenanceEvidence {
+    pub kind: LocalProvenanceKind,
+    pub path: String,
+    pub revision: Option<String>,
+    pub content_digest: Option<String>,
+    pub confidence: LocalProvenanceConfidence,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalProvenanceKind {
+    GitRepositoryCommit,
+    LocalLockfile,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalProvenanceConfidence {
+    LocalMetadata,
+    LocalContent,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2064,6 +2090,7 @@ mod tests {
                     executable: true,
                 }),
                 raw_symlink_target: None,
+                local_provenance: Vec::new(),
             }],
             skill: TakeoverSkillEvidence {
                 skill_id,
@@ -2162,6 +2189,7 @@ mod tests {
             entry_kind: EntryKind::Directory,
             metadata: Some(metadata),
             raw_symlink_target: None,
+            local_provenance: Vec::new(),
         });
         evidence.replacements.push(TakeoverReplacementEvidence {
             observation_id,

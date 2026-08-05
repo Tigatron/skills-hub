@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use specta::Type;
 use thiserror::Error;
 
 use super::BundleDigest;
@@ -160,7 +161,7 @@ pub enum DeploymentMode {
     ManagedCopy,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 pub enum OperationState {
     Planned,
@@ -226,7 +227,7 @@ pub struct OperationTransitionError {
     pub to: OperationState,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 pub enum OperationOutcome {
     Succeeded,
@@ -234,6 +235,40 @@ pub enum OperationOutcome {
     FailedNoWrites,
     FailedRolledBack,
     RecoveryRequired,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum OperationTone {
+    Neutral,
+    Pending,
+    Success,
+    Danger,
+}
+
+impl OperationTone {
+    #[must_use]
+    pub const fn from_state(state: OperationState, outcome: Option<OperationOutcome>) -> Self {
+        match outcome {
+            Some(OperationOutcome::Succeeded) => Self::Success,
+            Some(
+                OperationOutcome::CancelledNoWrites
+                | OperationOutcome::FailedNoWrites
+                | OperationOutcome::FailedRolledBack
+                | OperationOutcome::RecoveryRequired,
+            ) => Self::Danger,
+            None if matches!(
+                state,
+                OperationState::Failed
+                    | OperationState::RolledBack
+                    | OperationState::RecoveryRequired
+            ) =>
+            {
+                Self::Danger
+            }
+            None => Self::Pending,
+        }
+    }
 }
 
 #[cfg(test)]

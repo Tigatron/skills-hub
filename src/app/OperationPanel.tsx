@@ -1,12 +1,7 @@
 import { useMutation } from '@tanstack/react-query';
 
 import type { AnyOperationView } from '../bindings';
-import {
-  api,
-  isTerminalOperationState,
-  operationOutcomeLabel,
-  type ReviewedPlan,
-} from '../lib/api';
+import { api, operationOutcomeLabel, type ReviewedPlan } from '../lib/api';
 import {
   DangerButton,
   ErrorBanner,
@@ -49,8 +44,8 @@ export function OperationPanel({
     );
   }
 
-  const tone = operationTone(operation);
-  const terminal = operation ? isTerminalOperationState(operation.value.state) : false;
+  const tone = operation?.value.tone ?? 'neutral';
+  const terminal = operation?.value.terminal ?? false;
   const currentExport =
     plan &&
     exportPlan.data?.operationId === plan.plan.operationId &&
@@ -114,7 +109,7 @@ export function OperationPanel({
             {busy ? 'Running…' : 'Execute reviewed plan'}
           </PrimaryButton>
         ) : null}
-        {operation && !terminal ? (
+        {operation?.value.cancellationAllowed ? (
           <DangerButton onPress={onCancel} isDisabled={busy}>
             Request cancel
           </DangerButton>
@@ -230,30 +225,5 @@ function PlanReview({ plan }: { plan: ReviewedPlan }) {
 }
 
 function executionAllowed(plan: ReviewedPlan): boolean {
-  if (plan.kind === 'trash') {
-    return Boolean(plan.plan.operationId) && plan.plan.blockers.length === 0;
-  }
-  if (plan.kind === 'takeover') {
-    return plan.plan.executionAllowed;
-  }
-  if (plan.kind === 'deployment') {
-    return plan.plan.executionAllowed;
-  }
-  return plan.plan.entries.every((entry) => entry.executionAllowed);
-}
-
-function operationTone(
-  operation: AnyOperationView | null,
-): 'neutral' | 'success' | 'pending' | 'danger' {
-  if (!operation) {
-    return 'neutral';
-  }
-  const label = operationOutcomeLabel(operation).toLowerCase();
-  if (label.includes('success') || label.includes('final')) {
-    return 'success';
-  }
-  if (label.includes('fail') || label.includes('roll') || label.includes('recovery')) {
-    return 'danger';
-  }
-  return 'pending';
+  return plan.plan.executionAllowed;
 }

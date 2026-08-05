@@ -156,6 +156,8 @@ describe('SettingsPanel', () => {
         },
       ],
       refused: [],
+      executionAllowed: true,
+      disabledReasons: [],
     });
     vi.mocked(api.vaultRepairExecute).mockResolvedValue(1);
     renderPanel();

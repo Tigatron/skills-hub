@@ -260,7 +260,7 @@ Completed on 2026-08-05 with schema-v5 internal-Vault Operations for move, resto
 
 | Field           | Value                                                                                                                                                                                                             |
 | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Status          | Complete (2026-08-05)                                                                                                                                                                                             |
+| Status          | Complete (2026-08-05; acceptance rework)                                                                                                                                                                           |
 | Dependencies    | M0-009, M0-010, M0-011, M0-012, M0-013                                                                                                                                                                            |
 | PRD coverage    | SCN-05/09, IMP-01/02, DPL-10/12, DEL-01/02/03/04/05, VLT-06; PRD §9 information architecture and §12 UX brief                                                                                                     |
 | Design          | [Tauri/UI contract](../interfaces/tauri-and-ui-state.md), [System context](../architecture/system-context.md), [Testing and acceptance](../quality/testing-and-acceptance.md)                                     |
@@ -307,11 +307,12 @@ The UI renders Rust-provided read models and capabilities only; it computes no o
 
 ## Implementation evidence
 
+- Acceptance rework completed on 2026-08-05 after the initial breadth claim was rejected. Rust now supplies External, Vaulted, and Managed Library rows; snapshot and linked-Activity summaries; action capabilities with disabled reasons; and typed operation terminal, cancellation, execution, success, and presentation-tone fields.
 - The shell now exposes Library, Deployments, Activity, Trash, and Settings without M1 Discover or Collections routes. A locally persistent setup checklist derives progress from Rust read models rather than optimistic UI state.
-- Library renders bounded 100-row pages with duplicate/conflict summaries, long-path-safe observation detail, Keep external/takeover/deploy plans, Vault provenance/conflicts, and contained file preview. Deployments offers Agent, Project, and Skill groupings through keyboard-operable matrix and list views over the same query result and capability-gated verify/undeploy actions.
+- Library uses bounded backend paging plus `@tanstack/react-virtual` windowing, with duplicate/conflict summaries, long-path-safe observation detail, Keep external/takeover/deploy plans, Vault provenance/conflicts, contained file preview, snapshot/activity evidence, and disabled-action explanations. Copy actions are available for local paths and Rust-authorized Vault working paths can be revealed in Finder. Deployments offers Agent, Project, and Skill groupings through keyboard-operable matrix and list views over the same query result and capability-gated verify/undeploy actions.
 - Settings integrates real Workspace Root and manual-project lifecycle commands with complete/incomplete/stale coverage evidence; adapter enablement and override drafts; custom targets; Vault verify plus reviewed repair, rebuild, relocation, and two-phase object-GC entry points; and Trash retention. Trash has separate restore and exact-name guarded permanent-delete review/execute flows with no optimistic removal.
 - `operation_plan_export` validates the exact persisted Operation Plan and returns stable human-readable JSON without authorization or execution. The renderer downloads those backend bytes rather than rebuilding a plan in TypeScript.
-- Surface suites cover empty, incomplete, long-path, blocked, recovery-plan, matrix/list keyboard, Trash guard, post-success invalidation, and plan-export snapshot behavior. The completion gate passed with 25 frontend tests; 239 Rust library tests plus bindings/harness tests (3 intentional crash-helper ignores); strict Clippy; generated-binding drift; TypeScript, ESLint, docs, formatting, and renderer production build checks.
+- The complete rework gate passed formatting, ESLint, strict Clippy, TypeScript, 44 frontend tests, 247 Rust library tests with four intentional crash-helper ignores, bindings and harness tests, generated-binding drift, OKF documentation validation, and the production renderer build.
 
 ## Risks and recovery
 

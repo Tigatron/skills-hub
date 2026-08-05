@@ -141,9 +141,7 @@ export function ActivityPanel() {
               >
                 <div className={styles.listItemTitle}>
                   <span>{item.summary}</span>
-                  <StatusPill tone={outcomeTone(item.outcome)}>
-                    {item.outcome ?? item.state}
-                  </StatusPill>
+                  <StatusPill tone={item.tone}>{item.outcome ?? item.state}</StatusPill>
                 </div>
                 <div className={styles.listItemMeta}>
                   {item.kind} · {item.startedAt}
@@ -211,12 +209,14 @@ export function ActivityPanel() {
                   <ul>
                     {detail.data.operation.paths.map((path) => (
                       <li key={`${path.stepOrder}-${path.path}`}>
-                        #{path.stepOrder} {path.path}
+                        #{path.stepOrder} <PathText path={path.path} />
                         {path.resolvedMode ? ` · ${path.resolvedMode}` : ''}
                       </li>
                     ))}
                     {detail.data.operation.recoveryReferences.map((reference) => (
-                      <li key={reference}>Recovery: {reference}</li>
+                      <li key={reference}>
+                        Recovery: <PathText path={reference} />
+                      </li>
                     ))}
                   </ul>
                   {detail.data.item.operationId ? (
@@ -269,18 +269,4 @@ export function ActivityPanel() {
       </section>
     </div>
   );
-}
-
-function outcomeTone(outcome: string | null): 'neutral' | 'success' | 'pending' | 'danger' {
-  const value = (outcome ?? '').toLowerCase();
-  if (value.includes('success')) {
-    return 'success';
-  }
-  if (value.includes('fail') || value.includes('roll') || value.includes('recovery')) {
-    return 'danger';
-  }
-  if (value) {
-    return 'pending';
-  }
-  return 'neutral';
 }

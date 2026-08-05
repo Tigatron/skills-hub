@@ -193,6 +193,8 @@ export const api = {
     unwrap(commands.vaultRelocatePlan(request)),
   vaultRelocateExecute: (request: ExecuteLifecycleRequest): Promise<VaultRelocateResult> =>
     unwrap(commands.vaultRelocateExecute(request)),
+  vaultRevealWorking: (skillId: string): Promise<string> =>
+    unwrap(commands.vaultRevealWorking({ skillId })),
 };
 
 export type NavId = 'library' | 'deployments' | 'activity' | 'trash' | 'settings';
@@ -213,16 +215,6 @@ export function planIdentity(plan: ReviewedPlan): { operationId: string; planDig
 
 export function operationOutcomeLabel(view: AnyOperationView): string {
   return view.value.outcome ?? view.value.state;
-}
-
-export function isTerminalOperationState(state: string): boolean {
-  const normalized = state.toLowerCase();
-  return (
-    normalized.includes('final') ||
-    normalized.includes('fail') ||
-    normalized.includes('cancel') ||
-    normalized.includes('rolled')
-  );
 }
 
 export type ModeChoice = DeploymentModeDto | null;

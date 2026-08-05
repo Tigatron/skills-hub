@@ -20,8 +20,8 @@ use crate::{
     domain::{
         ActivityId, AdapterId, BundleDigest, BundleRelativePath, DeploymentHealth, DeploymentId,
         DeploymentMode, DeploymentName, DurationMillis, ManagedTargetObservation, OperationId,
-        OperationOutcome, OperationState, ProjectId, SkillId, SkillLifecycle, SnapshotId,
-        SymlinkTargetObservation, TargetId, UtcTimestamp, managed_copy_health,
+        OperationOutcome, OperationState, OperationTone, ProjectId, SkillId, SkillLifecycle,
+        SnapshotId, SymlinkTargetObservation, TargetId, UtcTimestamp, managed_copy_health,
         normalized_collision_key, symlink_health,
     },
     filesystem::{
@@ -160,6 +160,7 @@ pub struct BatchDeploymentPlanView {
     pub entries: Vec<DeploymentPlanView>,
     pub recovery_count: u32,
     pub consequence: String,
+    pub execution_allowed: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -250,6 +251,9 @@ pub struct DeploymentOperationView {
     pub plan_digest: String,
     pub state: String,
     pub outcome: Option<String>,
+    pub terminal: bool,
+    pub cancellation_allowed: bool,
+    pub tone: OperationTone,
     pub failure: Option<String>,
     pub recovery: Vec<String>,
     pub review: DeploymentPlanView,
@@ -263,6 +267,9 @@ pub struct BatchDeploymentOperationView {
     pub plan_digest: String,
     pub state: String,
     pub outcome: Option<String>,
+    pub terminal: bool,
+    pub cancellation_allowed: bool,
+    pub tone: OperationTone,
     pub failure: Option<String>,
     pub recovery: Vec<String>,
     pub review: BatchDeploymentPlanView,
@@ -1778,8 +1785,11 @@ impl DeploymentService {
             .map_err(|error| DeploymentError::Journal(error.to_string()))?;
         let operation_id = id.to_string();
         let plan_digest = stored.plan.plan_digest.to_string();
-        let state = format!("{:?}", stored.journal.state);
-        let outcome = stored.journal.outcome.map(|value| format!("{value:?}"));
+        let state = stored.journal.state;
+        let outcome = stored.journal.outcome;
+        let terminal = state.is_terminal();
+        let cancellation_allowed = !terminal;
+        let tone = OperationTone::from_state(state, outcome);
         let failure = stored
             .journal
             .failure
@@ -1796,8 +1806,11 @@ impl DeploymentService {
                 BatchDeploymentOperationView {
                     operation_id,
                     plan_digest,
-                    state,
-                    outcome,
+                    state: format!("{state:?}"),
+                    outcome: outcome.map(|value| format!("{value:?}")),
+                    terminal,
+                    cancellation_allowed,
+                    tone,
                     failure,
                     recovery,
                     review: batch_deployment_plan_view(&stored.plan)?,
@@ -1808,8 +1821,11 @@ impl DeploymentService {
         Ok(AnyOperationView::Deployment(DeploymentOperationView {
             operation_id,
             plan_digest,
-            state,
-            outcome,
+            state: format!("{state:?}"),
+            outcome: outcome.map(|value| format!("{value:?}")),
+            terminal,
+            cancellation_allowed,
+            tone,
             failure,
             recovery,
             review: deployment_plan_view(&stored.plan)?,
@@ -3484,6 +3500,7 @@ fn batch_deployment_plan_view(
             "One reviewed transaction across {} Targets",
             context.entries.len()
         ),
+        execution_allowed: plan.content.blockers.is_empty(),
     })
 }
 

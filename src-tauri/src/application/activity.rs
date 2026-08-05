@@ -5,7 +5,7 @@ use specta::Type;
 use thiserror::Error;
 
 use crate::{
-    domain::{ActivityId, BundleRelativePath, OperationOutcome},
+    domain::{ActivityId, BundleRelativePath, OperationOutcome, OperationTone},
     operations::{OperationKind, OperationPlan, OperationStore, StoredOperation},
     persistence::{
         ActivityQuery as RepositoryQuery, ActivityRecord, OperationRecord, Repositories,
@@ -30,6 +30,7 @@ pub struct ActivityItem {
     pub kind: String,
     pub state: String,
     pub outcome: Option<String>,
+    pub tone: OperationTone,
     pub summary: String,
     pub started_at: String,
     pub completed_at: Option<String>,
@@ -107,6 +108,7 @@ impl ActivityService {
                 Ok(ActivityItem {
                     id: record.id.to_string(),
                     kind: record.kind,
+                    tone: activity_tone(&record.state, record.outcome.as_deref()),
                     state: record.state,
                     outcome: record.outcome,
                     summary: record.summary,
@@ -128,6 +130,7 @@ impl ActivityService {
         let item = ActivityItem {
             id: detail.item.id.to_string(),
             kind: detail.item.kind,
+            tone: activity_tone(&detail.item.state, detail.item.outcome.as_deref()),
             state: detail.item.state,
             outcome: detail.item.outcome,
             summary: detail.item.summary,
@@ -248,6 +251,18 @@ impl ActivityService {
         self.repositories
             .finalize_operation(operation, operation_activity(activity_id, &stored)?)?;
         Ok(true)
+    }
+}
+
+fn activity_tone(state: &str, outcome: Option<&str>) -> OperationTone {
+    match outcome {
+        Some("succeeded") => OperationTone::Success,
+        Some(
+            "cancelled_no_writes" | "failed_no_writes" | "failed_rolled_back" | "recovery_required",
+        ) => OperationTone::Danger,
+        None if matches!(state, "queued" | "running" | "planned") => OperationTone::Pending,
+        None if matches!(state, "completed" | "finalized") => OperationTone::Success,
+        Some(_) | None => OperationTone::Neutral,
     }
 }
 

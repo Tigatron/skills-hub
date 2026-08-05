@@ -95,7 +95,7 @@ describe('App thin slice', () => {
 
     expect(await screen.findByRole('heading', { name: 'Create a Vault' })).toBeInTheDocument();
     expect(screen.getByText(/Default path/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Initialize default Vault' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Review Vault creation' })).toBeInTheDocument();
   });
 
   it('renders Library after the Vault is ready and keeps navigation keyboard reachable', async () => {
@@ -159,7 +159,10 @@ describe('App thin slice', () => {
 
     renderApp();
 
-    await user.click(await screen.findByRole('button', { name: 'Initialize default Vault' }));
+    await user.click(await screen.findByRole('button', { name: 'Review Vault creation' }));
+    expect(screen.getByRole('heading', { name: 'Confirm Vault creation' })).toBeInTheDocument();
+    expect(screen.getByText(/operation journals, snapshots/i)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Create Vault at /tmp/Skills Hub/Vault' }));
 
     await waitFor(() => {
       expect(api.vaultInitialize).toHaveBeenCalledWith({ selectedDirectory: null });

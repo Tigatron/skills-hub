@@ -50,6 +50,7 @@ const trashPlan: ReviewedPlan = {
       protectedReferences: [],
     },
     blockers: [],
+    executionAllowed: true,
   },
 };
 

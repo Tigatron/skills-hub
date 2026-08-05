@@ -11,6 +11,8 @@ export function FirstRun({ status }: { status: VaultStatusView }) {
   const queryClient = useQueryClient();
   const [customPath, setCustomPath] = useState('');
   const [useCustom, setUseCustom] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const selectedPath = useCustom && customPath.trim() ? customPath.trim() : status.defaultPath;
 
   const initialize = useMutation({
     mutationFn: () =>
@@ -79,19 +81,33 @@ export function FirstRun({ status }: { status: VaultStatusView }) {
 
         {initialize.isError ? <ErrorBanner error={initialize.error} /> : null}
 
+        {confirming ? (
+          <div className={styles.planBox} role="alert">
+            <h2>Confirm Vault creation</h2>
+            <p>Skills Hub will create its managed Vault structure at this exact path:</p>
+            <PathText path={selectedPath} />
+            <p className={styles.muted}>
+              This creates ordinary working directories plus the .manager index, manifests,
+              operation journals, snapshots, and recovery metadata. It does not scan, import,
+              deploy, overwrite, or delete any existing Skill.
+            </p>
+          </div>
+        ) : null}
+
         <div className={styles.firstRunActions}>
           <PrimaryButton
-            onPress={() => initialize.mutate()}
+            onPress={() => (confirming ? initialize.mutate() : setConfirming(true))}
             isDisabled={initialize.isPending || (useCustom && !customPath.trim())}
           >
-            {initialize.isPending ? 'Initializing…' : 'Initialize default Vault'}
+            {initialize.isPending
+              ? 'Initializing…'
+              : confirming
+                ? `Create Vault at ${selectedPath}`
+                : 'Review Vault creation'}
           </PrimaryButton>
-          {useCustom ? (
-            <SecondaryButton
-              onPress={() => initialize.mutate()}
-              isDisabled={initialize.isPending || !customPath.trim()}
-            >
-              Initialize custom path
+          {confirming ? (
+            <SecondaryButton onPress={() => setConfirming(false)} isDisabled={initialize.isPending}>
+              Go back
             </SecondaryButton>
           ) : null}
         </div>

@@ -17,7 +17,8 @@ pub use names::{
 };
 pub use state::{
     DeploymentHealth, DeploymentMode, DuplicateClassification, ManagedTargetObservation,
-    OperationOutcome, OperationState, OperationTransitionError, Ownership, SkillLifecycle,
-    SymlinkTargetObservation, classify_duplicate, managed_copy_health, ownership, symlink_health,
+    OperationOutcome, OperationState, OperationTone, OperationTransitionError, Ownership,
+    SkillLifecycle, SymlinkTargetObservation, classify_duplicate, managed_copy_health, ownership,
+    symlink_health,
 };
 pub use time::{DurationMillis, MonotonicTimer, TimeError, UtcTimestamp};

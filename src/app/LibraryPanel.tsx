@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useState } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from 'react-aria-components';
 
 import type {
@@ -59,9 +60,17 @@ export function LibraryPanel() {
     () => library.data?.items.find((item) => item.id === selectedId) ?? null,
     [library.data, selectedId],
   );
+  const listRef = useRef<HTMLDivElement>(null);
+  const rowVirtualizer = useVirtualizer({
+    count: library.data?.items.length ?? 0,
+    getScrollElement: () => listRef.current,
+    estimateSize: () => 92,
+    initialRect: { width: 640, height: 620 },
+    overscan: 5,
+  });
 
-  // Skill detail only when we have a vaulted skill id from takeover context or manual entry.
-  const vaultedSkillId = operationSkillId(operation) ?? (manualSkillId.trim() || null);
+  const vaultedSkillId =
+    selected?.skillId ?? operationSkillId(operation) ?? (manualSkillId.trim() || null);
   const skill = useQuery({
     queryKey: queryKeys.skill(vaultedSkillId ?? 'none'),
     queryFn: () => api.skillGet({ skillId: vaultedSkillId! }),
@@ -165,7 +174,6 @@ export function LibraryPanel() {
       };
     },
   });
-
   const planDeploy = useMutation({
     mutationFn: async () => {
       const skillId = vaultedSkillId;
@@ -324,32 +332,56 @@ export function LibraryPanel() {
             />
           ) : null}
 
-          <div className={styles.list} role="listbox" aria-label="Library items">
-            {library.data?.items.map((item) => (
-              <Button
-                key={item.id}
-                className={styles.listItem!}
-                onPress={() => setSelectedId(item.id)}
-                data-selected={selectedId === item.id}
-              >
-                <div className={styles.listItemTitle}>
-                  <span>{item.displayName}</span>
-                  <StatusPill tone={item.validation === 'verified' ? 'success' : 'danger'}>
-                    {item.validation}
-                  </StatusPill>
-                </div>
-                <div className={styles.listItemMeta}>
-                  {item.ownership} · {item.sourceSummary} · {item.locations.length} location
-                  {item.locations.length === 1 ? '' : 's'} · {item.deploymentCount} deployment
-                  {item.deploymentCount === 1 ? '' : 's'} · changed {item.changedAt}
-                </div>
-                <div className={styles.listItemMeta}>
-                  Exact duplicates {item.duplicateSummary.exactDuplicateLocations} · name conflicts{' '}
-                  {item.duplicateSummary.nameConflicts} · probable matches{' '}
-                  {item.duplicateSummary.probableDuplicatesOrRenames}
-                </div>
-              </Button>
-            ))}
+          <div
+            ref={listRef}
+            className={styles.virtualList}
+            role="listbox"
+            aria-label="Library items"
+            data-testid="library-virtual-list"
+          >
+            <div className={styles.virtualCanvas} style={{ height: rowVirtualizer.getTotalSize() }}>
+              {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                const item = library.data!.items[virtualRow.index]!;
+                const locationCount = item.locations.length + (item.workingLocation ? 1 : 0);
+                return (
+                  <Button
+                    key={item.id}
+                    ref={rowVirtualizer.measureElement}
+                    data-index={virtualRow.index}
+                    className={styles.listItem!}
+                    onPress={() => {
+                      setSelectedId(item.id);
+                      if (item.skillId) setManualSkillId(item.skillId);
+                    }}
+                    data-selected={selectedId === item.id}
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '100%',
+                      transform: `translateY(${virtualRow.start}px)`,
+                    }}
+                  >
+                    <div className={styles.listItemTitle}>
+                      <span>{item.displayName}</span>
+                      <StatusPill tone={item.validation === 'verified' ? 'success' : 'danger'}>
+                        {item.validation}
+                      </StatusPill>
+                    </div>
+                    <div className={styles.listItemMeta}>
+                      {item.ownership} · {item.sourceSummary} · {locationCount} location
+                      {locationCount === 1 ? '' : 's'} · {item.deploymentCount} deployment
+                      {item.deploymentCount === 1 ? '' : 's'} · changed {item.changedAt}
+                    </div>
+                    <div className={styles.listItemMeta}>
+                      Exact duplicates {item.duplicateSummary.exactDuplicateLocations} · name
+                      conflicts {item.duplicateSummary.nameConflicts} · probable matches{' '}
+                      {item.duplicateSummary.probableDuplicatesOrRenames}
+                    </div>
+                  </Button>
+                );
+              })}
+            </div>
           </div>
           {library.data && library.data.total > library.data.limit ? (
             <div className={styles.panelActions} aria-label="Library pagination">
@@ -391,35 +423,46 @@ export function LibraryPanel() {
                   <MetaRow label="Digest" value={selected.digest ?? 'Unavailable'} />
                   <MetaRow
                     label="Locations"
-                    value={selected.locations.map((location) => (
-                      <div key={location.observationId}>
-                        <PathText path={location.path} />
-                      </div>
-                    ))}
+                    value={
+                      <>
+                        {selected.workingLocation ? (
+                          <div>
+                            <PathText path={selected.workingLocation} />
+                          </div>
+                        ) : null}
+                        {selected.locations.map((location) => (
+                          <div key={location.observationId}>
+                            <PathText path={location.path} />
+                          </div>
+                        ))}
+                      </>
+                    }
                   />
                 </dl>
               </div>
 
-              <div className={styles.panelActions}>
-                <SecondaryButton
-                  onPress={() => keepExternal.mutate()}
-                  isDisabled={busy || !selected.nextActions.includes('keep_external')}
-                >
-                  Keep external
-                </SecondaryButton>
-                <SecondaryButton
-                  onPress={() => planTakeover.mutate('add_to_vault')}
-                  isDisabled={busy || !selected.nextActions.includes('add_to_vault')}
-                >
-                  Plan Add to Vault
-                </SecondaryButton>
-                <SecondaryButton
-                  onPress={() => planTakeover.mutate('add_and_manage')}
-                  isDisabled={busy || !selected.nextActions.includes('add_and_manage')}
-                >
-                  Plan Add and manage
-                </SecondaryButton>
-              </div>
+              {selected.ownership === 'external' ? (
+                <div className={styles.panelActions}>
+                  <SecondaryButton
+                    onPress={() => keepExternal.mutate()}
+                    isDisabled={busy || !selected.nextActions.includes('keep_external')}
+                  >
+                    Keep external
+                  </SecondaryButton>
+                  <SecondaryButton
+                    onPress={() => planTakeover.mutate('add_to_vault')}
+                    isDisabled={busy || !selected.nextActions.includes('add_to_vault')}
+                  >
+                    Plan Add to Vault
+                  </SecondaryButton>
+                  <SecondaryButton
+                    onPress={() => planTakeover.mutate('add_and_manage')}
+                    isDisabled={busy || !selected.nextActions.includes('add_and_manage')}
+                  >
+                    Plan Add and manage
+                  </SecondaryButton>
+                </div>
+              ) : null}
             </div>
           ) : (
             <EmptyState
@@ -453,7 +496,11 @@ export function LibraryPanel() {
                   />
                   <SecondaryButton
                     onPress={() => preview.mutate()}
-                    isDisabled={!previewPath.trim() || preview.isPending}
+                    isDisabled={
+                      !previewPath.trim() ||
+                      preview.isPending ||
+                      !capability(skill.data, 'preview')?.allowed
+                    }
                   >
                     {preview.isPending ? 'Loading…' : 'Preview'}
                   </SecondaryButton>
@@ -503,7 +550,12 @@ export function LibraryPanel() {
               </select>
               <SecondaryButton
                 onPress={() => planDeploy.mutate()}
-                isDisabled={busy || !targetId || !vaultedSkillId}
+                isDisabled={
+                  busy ||
+                  !targetId ||
+                  !vaultedSkillId ||
+                  (skill.data ? !capability(skill.data, 'deploy')?.allowed : false)
+                }
               >
                 Plan deploy
               </SecondaryButton>
@@ -561,7 +613,17 @@ export function SkillSummary({
       <dl className={styles.metaList}>
         <MetaRow label="Skill ID" value={detail.skillId} />
         <MetaRow label="Ownership" value={detail.ownership} />
-        <MetaRow label="Working path" value={<PathText path={detail.workingPath} />} />
+        <MetaRow
+          label="Working path"
+          value={
+            <PathText
+              path={detail.workingPath}
+              {...(capability(detail, 'reveal')?.allowed
+                ? { onReveal: () => api.vaultRevealWorking(detail.skillId) }
+                : {})}
+            />
+          }
+        />
         <MetaRow label="Working digest" value={detail.workingDigest} />
         <MetaRow label="Baseline digest" value={detail.baselineDigest} />
         <MetaRow label="Lifecycle" value={detail.lifecycle} />
@@ -582,6 +644,31 @@ export function SkillSummary({
           }
         />
         <MetaRow label="Conflicts" value={detail.conflicts.join(', ') || 'None'} />
+        <MetaRow
+          label="Snapshots"
+          value={
+            detail.snapshot.available
+              ? `${detail.snapshot.count} retained · ${detail.snapshot.protectedCount} protected · latest ${detail.snapshot.latestCreatedAt ?? 'unknown'}`
+              : (detail.snapshot.unavailableReason ?? 'Unavailable')
+          }
+        />
+        <MetaRow
+          label="Activity"
+          value={
+            detail.activity.length
+              ? detail.activity.map((item) => (
+                  <div key={item.activityId}>
+                    {item.summary} · {item.outcome ?? item.kind} · {item.startedAt}
+                    {item.undoCheckAvailable
+                      ? ' · Undo plan check available'
+                      : item.undoCheckReason
+                        ? ` · Undo: ${item.undoCheckReason}`
+                        : ''}
+                  </div>
+                ))
+              : 'No linked activity'
+          }
+        />
         <MetaRow
           label="Deployments"
           value={
@@ -612,18 +699,31 @@ export function SkillSummary({
         ) : null}
       </dl>
       <div className={styles.panelActions}>
-        {detail.allowedActions.includes('move_to_trash') ? (
-          <SecondaryButton onPress={() => onPlan('move_to_trash')} isDisabled={busy}>
+        {capability(detail, 'move_to_trash') ? (
+          <SecondaryButton
+            onPress={() => onPlan('move_to_trash')}
+            isDisabled={busy || !capability(detail, 'move_to_trash')?.allowed}
+          >
             Plan Move to Trash
           </SecondaryButton>
         ) : null}
-        {detail.allowedActions.includes('restore') ? (
-          <SecondaryButton onPress={() => onPlan('restore')} isDisabled={busy}>
+        {capability(detail, 'restore') ? (
+          <SecondaryButton
+            onPress={() => onPlan('restore')}
+            isDisabled={busy || !capability(detail, 'restore')?.allowed}
+          >
             Plan restore
           </SecondaryButton>
         ) : null}
       </div>
-      {detail.allowedActions.includes('permanently_delete') ? (
+      {detail.capabilities
+        .filter((item) => !item.allowed && item.disabledReason)
+        .map((item) => (
+          <p className={styles.muted} key={item.action}>
+            {item.action.replaceAll('_', ' ')} unavailable: {item.disabledReason}
+          </p>
+        ))}
+      {capability(detail, 'permanently_delete')?.allowed ? (
         <div className={styles.stack}>
           <p className={styles.muted}>
             Permanent deletion cannot be undone. Type <strong>{detail.displayName}</strong> exactly
@@ -638,7 +738,11 @@ export function SkillSummary({
             />
             <SecondaryButton
               onPress={() => onPlan('permanently_delete')}
-              isDisabled={busy || confirmation !== detail.displayName}
+              isDisabled={
+                busy ||
+                !capability(detail, 'permanently_delete')?.allowed ||
+                confirmation !== detail.displayName
+              }
             >
               Plan permanent delete
             </SecondaryButton>
@@ -647,6 +751,10 @@ export function SkillSummary({
       ) : null}
     </div>
   );
+}
+
+function capability(detail: SkillDetail, action: SkillDetail['capabilities'][number]['action']) {
+  return detail.capabilities.find((item) => item.action === action);
 }
 
 function operationSkillId(operation: AnyOperationView | null): string | null {

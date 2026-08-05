@@ -22,7 +22,8 @@ pub use journal::{
 pub use plan::{
     BatchDeploymentAction, BatchDeploymentEntryEvidence, BatchDeploymentInverseEvidence,
     BatchDeploymentPlanContext, CapabilityStatus, DeploymentPlanContext, DeploymentProductAction,
-    DeploymentSkillEvidence, DeploymentTargetEvidence, ManagedDeploymentEvidence, OperationKind,
+    DeploymentSkillEvidence, DeploymentTargetEvidence, LocalProvenanceConfidence,
+    LocalProvenanceEvidence, LocalProvenanceKind, ManagedDeploymentEvidence, OperationKind,
     OperationPlan, OperationPlanContent, OwnershipChoice, OwnershipDecision, PathFingerprint,
     PlanAction, PlanBlocker, PlanBlockerCode, PlanBuildError, PlanDigest, PlanPath, PlanStep,
     RecoverySummary, TakeoverDecision, TakeoverObservationEvidence, TakeoverObservationStatus,

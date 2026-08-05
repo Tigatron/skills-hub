@@ -11,19 +11,19 @@ use thiserror::Error;
 
 use crate::{
     domain::{
-        ActivityId, AdapterId, BundleRelativePath, DurationMillis, OperationId, SkillId,
-        SkillLifecycle, SnapshotId, TargetId, TrashEntryId, UtcTimestamp,
+        ActivityId, AdapterId, BundleRelativePath, DurationMillis, OperationId, OperationOutcome,
+        SkillId, SkillLifecycle, SnapshotId, TargetId, TrashEntryId, UtcTimestamp,
     },
     filesystem::{
         AuthorizedRoot, BundleCaps, EntryKind, MetadataFingerprint, copy_bundle_exact, hash_bundle,
     },
     operations::{
         CancellationToken, OperationCoordinator, OperationError, OperationExecutor,
-        OperationFinalizer, OperationHookError, OperationIntent, OperationKind, OperationPlan,
-        OperationPlanContent, OperationPlanner, OperationPreflight, OperationStore,
-        PathFingerprint, PlanAction, PlanBuilder, PlanPath, PlanStep, RecoverySummary,
-        SnapshotProtection, SnapshotRegistrar, SnapshotRegistration, StagingProvider, TargetRoots,
-        TrashAction, TrashPlanContext, TrashRetentionPolicy,
+        OperationFailpoints, OperationFinalizer, OperationHookError, OperationIntent,
+        OperationKind, OperationPlan, OperationPlanContent, OperationPlanner, OperationPreflight,
+        OperationStore, PathFingerprint, PlanAction, PlanBuilder, PlanPath, PlanStep,
+        RecoverySummary, SnapshotProtection, SnapshotRegistrar, SnapshotRegistration,
+        StagingProvider, TargetRoots, TrashAction, TrashPlanContext, TrashRetentionPolicy,
     },
     persistence::{
         ObjectRecord, OpenVault, RepositoryError, SkillRecord, TrashEntryManifest, TrashPolicy,
@@ -85,6 +85,7 @@ pub struct TrashPlanView {
     pub plan_digest: String,
     pub entry: TrashEntryView,
     pub blockers: Vec<TrashBlockerView>,
+    pub execution_allowed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -92,6 +93,8 @@ pub struct TrashPlanView {
 pub struct TrashExecutionView {
     pub operation_id: String,
     pub outcome: String,
+    pub succeeded: bool,
+    pub tone: crate::domain::OperationTone,
     pub replayed: bool,
 }
 
@@ -132,6 +135,7 @@ pub struct TrashService {
     vault: Arc<OpenVault>,
     coordinator: Arc<OperationCoordinator>,
     store: OperationStore,
+    operation_failpoints: Arc<dyn OperationFailpoints>,
 }
 
 impl TrashService {
@@ -145,7 +149,14 @@ impl TrashService {
             vault,
             coordinator,
             store,
+            operation_failpoints: Arc::new(crate::operations::NoopOperationFailpoints),
         })
+    }
+
+    #[cfg(test)]
+    fn with_failpoints(mut self, failpoints: Arc<dyn OperationFailpoints>) -> Self {
+        self.operation_failpoints = failpoints;
+        self
     }
 
     /// Returns blockers without creating an operation. A reviewable plan is persisted only after
@@ -182,6 +193,7 @@ impl TrashService {
                         .into(),
                     deployment_ids: active.iter().map(|d| d.id.to_string()).collect(),
                 }],
+                execution_allowed: false,
             });
         }
         let operation_id = OperationId::generate();
@@ -212,6 +224,7 @@ impl TrashService {
             plan_digest: plan.plan_digest.to_string(),
             entry: reviewed_entry_view(&skill, entry_id, plan.content.created_at, c),
             blockers: vec![],
+            execution_allowed: true,
         })
     }
 
@@ -306,6 +319,7 @@ impl TrashService {
             plan_digest: plan.plan_digest.to_string(),
             entry: manifest_view(&manifest),
             blockers: vec![],
+            execution_allowed: true,
         })
     }
 
@@ -352,7 +366,7 @@ impl TrashService {
             .repositories
             .permanent_delete_blockers(skill.id, manifest.working_digest)?;
         if !blockers.is_empty() {
-            return Ok(TrashPlanView { operation_id: String::new(), plan_digest: String::new(), entry: manifest_view(&manifest), blockers: vec![TrashBlockerView { code: "protected_or_unresolved_references".into(), detail: "Protected Snapshot or unresolved operation evidence still refers to this Trash entry.".into(), deployment_ids: blockers }] });
+            return Ok(TrashPlanView { operation_id: String::new(), plan_digest: String::new(), entry: manifest_view(&manifest), blockers: vec![TrashBlockerView { code: "protected_or_unresolved_references".into(), detail: "Protected Snapshot or unresolved operation evidence still refers to this Trash entry.".into(), deployment_ids: blockers }], execution_allowed: false });
         }
         // Nonterminal file journals are authoritative even if their projection has not landed.
         for id in self
@@ -374,6 +388,7 @@ impl TrashService {
                         detail: "An unresolved operation journal refers to this Skill.".into(),
                         deployment_ids: vec![id.to_string()],
                     }],
+                    execution_allowed: false,
                 });
             }
         }
@@ -402,6 +417,7 @@ impl TrashService {
             plan_digest: plan.plan_digest.to_string(),
             entry: manifest_view(&manifest),
             blockers: vec![],
+            execution_allowed: true,
         })
     }
 
@@ -547,7 +563,8 @@ impl TrashService {
             hooks.clone(),
             hooks.clone(),
         )
-        .with_preflight(hooks))
+        .with_preflight(hooks)
+        .with_failpoints(Arc::clone(&self.operation_failpoints)))
     }
 
     fn execute_checked(
@@ -576,6 +593,11 @@ impl TrashService {
         Ok(TrashExecutionView {
             operation_id: id.to_string(),
             outcome: format!("{:?}", execution.outcome).to_lowercase(),
+            succeeded: execution.outcome == OperationOutcome::Succeeded,
+            tone: crate::domain::OperationTone::from_state(
+                crate::domain::OperationState::Finalized,
+                Some(execution.outcome),
+            ),
             replayed: execution.replayed,
         })
     }
@@ -1548,6 +1570,7 @@ mod tests {
 
     use crate::{
         domain::{DeploymentHealth, DeploymentId, DeploymentMode, DeploymentName},
+        operations::OperationBoundary,
         persistence::{
             DeploymentRecord, LocalSourceKind, SkillManifest, SkillManifestSource,
             SourceConfidence, TargetRecord,
@@ -1564,6 +1587,18 @@ mod tests {
         working_container: PathBuf,
         working_bundle: PathBuf,
         source: PathBuf,
+    }
+
+    struct FailAt(OperationBoundary);
+
+    impl OperationFailpoints for FailAt {
+        fn check(&self, boundary: OperationBoundary) -> Result<(), OperationHookError> {
+            if boundary == self.0 {
+                Err(hook(format!("injected Trash failure at {boundary:?}")))
+            } else {
+                Ok(())
+            }
+        }
     }
 
     fn fixture() -> Fixture {
@@ -1677,6 +1712,125 @@ mod tests {
             })
             .unwrap();
         (plan, result)
+    }
+
+    fn service_failing_at(fixture: &Fixture, boundary: OperationBoundary) -> TrashService {
+        TrashService::with_runtime(
+            Arc::clone(&fixture.vault),
+            Arc::new(OperationCoordinator::new()),
+        )
+        .unwrap()
+        .with_failpoints(Arc::new(FailAt(boundary)))
+    }
+
+    #[test]
+    fn every_trash_transition_uses_shared_preflight_and_is_no_write_when_blocked() {
+        let move_fixture = fixture();
+        let move_plan = move_fixture
+            .service
+            .plan_move_to_trash(&TrashPlanRequest {
+                skill_id: move_fixture.skill_id.to_string(),
+            })
+            .unwrap();
+        let before_move = tree_bytes(&move_fixture.working_bundle);
+        assert!(
+            service_failing_at(&move_fixture, OperationBoundary::Preflighted)
+                .execute_move_to_trash(&TrashExecuteRequest {
+                    operation_id: move_plan.operation_id,
+                    plan_digest: move_plan.plan_digest,
+                })
+                .is_err()
+        );
+        assert_eq!(tree_bytes(&move_fixture.working_bundle), before_move);
+
+        let restore_fixture = fixture();
+        let (trashed, _) = move_to_trash(&restore_fixture);
+        let restore_plan = restore_fixture
+            .service
+            .plan_restore(&TrashEntryRequest {
+                entry_id: trashed.entry.entry_id.clone(),
+            })
+            .unwrap();
+        let trash_path = restore_fixture.vault.paths.trash_entry(
+            restore_fixture.skill_id,
+            trashed.entry.entry_id.parse().unwrap(),
+        );
+        let before_restore = tree_bytes(&trash_path);
+        assert!(
+            service_failing_at(&restore_fixture, OperationBoundary::Preflighted)
+                .execute_restore(&TrashExecuteRequest {
+                    operation_id: restore_plan.operation_id,
+                    plan_digest: restore_plan.plan_digest,
+                })
+                .is_err()
+        );
+        assert_eq!(tree_bytes(&trash_path), before_restore);
+
+        let delete_fixture = fixture();
+        let (trashed, _) = move_to_trash(&delete_fixture);
+        delete_fixture
+            .vault
+            .database
+            .execute_critical(|connection| {
+                connection
+                    .execute("UPDATE snapshots SET protected=0", [])
+                    .map(|_| ())
+                    .map_err(crate::persistence::DbExecutorError::Sqlite)
+            })
+            .unwrap();
+        let delete_plan = delete_fixture
+            .service
+            .plan_permanent_delete(&PermanentDeleteRequest {
+                entry_id: trashed.entry.entry_id.clone(),
+                confirmation: "Trash Fixture".into(),
+            })
+            .unwrap();
+        let trash_path = delete_fixture.vault.paths.trash_entry(
+            delete_fixture.skill_id,
+            trashed.entry.entry_id.parse().unwrap(),
+        );
+        let before_delete = tree_bytes(&trash_path);
+        assert!(
+            service_failing_at(&delete_fixture, OperationBoundary::Preflighted)
+                .execute_permanent_delete(&TrashExecuteRequest {
+                    operation_id: delete_plan.operation_id,
+                    plan_digest: delete_plan.plan_digest,
+                })
+                .is_err()
+        );
+        assert_eq!(tree_bytes(&trash_path), before_delete);
+    }
+
+    #[test]
+    fn trash_shared_boundary_failures_preserve_exact_working_content() {
+        for boundary in [
+            OperationBoundary::SnapshotPublished,
+            OperationBoundary::StageActionApplied(1),
+            OperationBoundary::FinalRenamed(1),
+            OperationBoundary::VerifyObserved(0),
+        ] {
+            let fixture = fixture();
+            let expected = tree_bytes(&fixture.working_bundle);
+            let plan = fixture
+                .service
+                .plan_move_to_trash(&TrashPlanRequest {
+                    skill_id: fixture.skill_id.to_string(),
+                })
+                .unwrap();
+            let result = service_failing_at(&fixture, boundary).execute_move_to_trash(
+                &TrashExecuteRequest {
+                    operation_id: plan.operation_id,
+                    plan_digest: plan.plan_digest,
+                },
+            );
+            assert!(result.is_err(), "{boundary:?}");
+            assert!(fixture.working_bundle.is_dir(), "{boundary:?}");
+            assert_eq!(
+                tree_bytes(&fixture.working_bundle),
+                expected,
+                "{boundary:?}"
+            );
+        }
     }
 
     #[test]

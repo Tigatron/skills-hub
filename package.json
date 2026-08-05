@@ -30,6 +30,7 @@
   },
   "dependencies": {
     "@tanstack/react-query": "5.101.4",
+    "@tanstack/react-virtual": "3.14.9",
     "@tauri-apps/api": "2.11.1",
     "react": "19.2.8",
     "react-aria-components": "1.19.0",

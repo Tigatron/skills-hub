@@ -88,7 +88,7 @@ export function TrashPanel() {
     },
     onSuccess: async (result) => {
       setOutcome(result);
-      if (result.outcome !== 'succeeded') return;
+      if (!result.succeeded) return;
       setReview(null);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.trash }),
@@ -309,14 +309,14 @@ function PlanReview({
         {review.action === 'permanently_delete' ? (
           <DangerButton
             onPress={onExecute}
-            isDisabled={busy || review.plan.blockers.length > 0 || !exportMatches(review)}
+            isDisabled={busy || !review.plan.executionAllowed || !exportMatches(review)}
           >
             Execute reviewed permanent deletion
           </DangerButton>
         ) : (
           <PrimaryButton
             onPress={onExecute}
-            isDisabled={busy || review.plan.blockers.length > 0 || !exportMatches(review)}
+            isDisabled={busy || !review.plan.executionAllowed || !exportMatches(review)}
           >
             Execute reviewed restore
           </PrimaryButton>
@@ -330,17 +330,16 @@ function PlanReview({
 }
 
 function ExecutionOutcome({ outcome }: { outcome: TrashExecutionView }) {
-  const succeeded = outcome.outcome === 'succeeded';
   return (
     <div className={styles.outcome} role="status">
       <div className={styles.itemTop}>
         <strong>Trash operation outcome</strong>
-        <StatusPill tone={succeeded ? 'success' : 'danger'}>{outcome.outcome}</StatusPill>
+        <StatusPill tone={outcome.tone}>{outcome.outcome}</StatusPill>
       </div>
       <p>
         Operation {outcome.operationId}
         {outcome.replayed ? ' · durable outcome replayed' : ' · durable outcome recorded'}
-        {succeeded ? '' : ' · reviewed plan retained for recovery or inspection'}
+        {outcome.succeeded ? '' : ' · reviewed plan retained for recovery or inspection'}
       </p>
     </div>
   );

@@ -245,6 +245,18 @@
   overflow: auto;
 }
 
+.virtualList {
+  position: relative;
+  height: min(52vh, 620px);
+  min-height: 260px;
+  overflow: auto;
+}
+
+.virtualCanvas {
+  position: relative;
+  width: 100%;
+}
+
 .listItem {
   display: grid;
   gap: 4px;
@@ -442,6 +454,44 @@
   font-family: var(--font-body);
   font-size: 11px;
   overflow-wrap: anywhere;
+}
+
+.pathGroup {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  max-width: 100%;
+}
+
+.pathActions {
+  display: inline-flex;
+  flex: none;
+  gap: 4px;
+}
+
+.pathAction {
+  padding: 0;
+  border: 0;
+  color: var(--accent-strong);
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.pathAction[data-focus-visible] {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 2px;
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .errorBanner {

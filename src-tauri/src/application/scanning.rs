@@ -360,10 +360,16 @@ impl ScanningService {
                 maximum: MAXIMUM_LIBRARY_PAGE_SIZE,
             });
         }
-        let records = self
-            .run_repository(Repositories::external_observations)
+        let (records, skills, deployments) = self
+            .run_repository(|repositories| {
+                Ok((
+                    repositories.external_observations()?,
+                    repositories.skills()?,
+                    repositories.all_deployments()?,
+                ))
+            })
             .await?;
-        Ok(build_library_page(records, &query))
+        Ok(build_library_page(records, skills, &deployments, &query))
     }
 
     async fn load_managed_links(
@@ -947,6 +953,7 @@ pub struct LibraryPage {
 #[serde(rename_all = "camelCase")]
 pub struct LibraryItem {
     pub id: String,
+    pub skill_id: Option<String>,
     pub display_name: String,
     pub deployment_name: String,
     pub ownership: LibraryOwnership,
@@ -956,6 +963,7 @@ pub struct LibraryItem {
     pub validation: LibraryValidation,
     pub duplicate_summary: DuplicateSummary,
     pub deployment_count: u32,
+    pub working_location: Option<String>,
     pub changed_at: String,
     pub next_actions: Vec<LibraryAction>,
 }
@@ -964,6 +972,8 @@ pub struct LibraryItem {
 #[serde(rename_all = "snake_case")]
 pub enum LibraryOwnership {
     External,
+    Vaulted,
+    Managed,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -1025,6 +1035,8 @@ struct ExternalGroup {
 
 fn build_library_page(
     records: Vec<ExternalObservationRecord>,
+    skills: Vec<crate::persistence::SkillRecord>,
+    deployments: &[crate::persistence::DeploymentRecord],
     query: &LibraryQuery,
 ) -> LibraryPage {
     let mut grouped = BTreeMap::<ExternalGroupKey, ExternalGroup>::new();
@@ -1070,6 +1082,12 @@ fn build_library_page(
         .filter(|item| matches_search(item, search.as_deref()))
         .filter(|item| matches_filter(item, query.filter))
         .collect::<Vec<_>>();
+    items.extend(
+        managed_library_items(skills, deployments)
+            .into_iter()
+            .filter(|item| matches_search(item, search.as_deref()))
+            .filter(|item| matches_filter(item, query.filter)),
+    );
     items.sort_by(|left, right| {
         normalized_collision_key(&left.display_name)
             .cmp(&normalized_collision_key(&right.display_name))
@@ -1090,6 +1108,52 @@ fn build_library_page(
         offset: query.offset,
         limit: query.limit,
     }
+}
+
+fn managed_library_items(
+    skills: Vec<crate::persistence::SkillRecord>,
+    deployments: &[crate::persistence::DeploymentRecord],
+) -> Vec<LibraryItem> {
+    skills
+        .into_iter()
+        .filter(|skill| skill.lifecycle == crate::domain::SkillLifecycle::Active)
+        .map(|skill| {
+            let active_deployments = deployments
+                .iter()
+                .filter(|deployment| deployment.skill_id == skill.id && deployment.active)
+                .count();
+            let managed = active_deployments > 0;
+            LibraryItem {
+                id: format!("skill:{}", skill.id),
+                skill_id: Some(skill.id.to_string()),
+                display_name: skill.display_name,
+                deployment_name: skill.deployment_name.to_string(),
+                ownership: if managed {
+                    LibraryOwnership::Managed
+                } else {
+                    LibraryOwnership::Vaulted
+                },
+                source_summary: if managed {
+                    format!("Managed · {active_deployments} deployments")
+                } else {
+                    "Vaulted".to_owned()
+                },
+                locations: Vec::new(),
+                digest: Some(skill.working_digest.to_string()),
+                validation: LibraryValidation::Verified,
+                duplicate_summary: DuplicateSummary {
+                    exact_duplicate_locations: 0,
+                    name_conflicts: 0,
+                    probable_duplicates_or_renames: 0,
+                    unverified: false,
+                },
+                deployment_count: count(active_deployments),
+                working_location: Some(skill.working_path.to_string()),
+                changed_at: skill.updated_at.to_string(),
+                next_actions: Vec::new(),
+            }
+        })
+        .collect()
 }
 
 fn library_item(
@@ -1145,6 +1209,7 @@ fn library_item(
         .collect::<Vec<_>>();
     LibraryItem {
         id: format!("external:{}", first.id),
+        skill_id: None,
         display_name: first.deployment_name.to_string(),
         deployment_name: first.deployment_name.to_string(),
         ownership: LibraryOwnership::External,
@@ -1172,6 +1237,7 @@ fn library_item(
             unverified: group.digest.is_none(),
         },
         deployment_count: 0,
+        working_location: None,
         changed_at: changed_at.to_string(),
         next_actions: if verified {
             vec![
@@ -1198,6 +1264,10 @@ fn matches_search(item: &LibraryItem, search: Option<&str>) -> bool {
         return true;
     };
     normalized_collision_key(&item.display_name).contains(search)
+        || item
+            .working_location
+            .as_deref()
+            .is_some_and(|path| normalized_collision_key(path).contains(search))
         || item
             .locations
             .iter()
@@ -1330,8 +1400,8 @@ mod tests {
             filter: LibraryFilter::All,
         };
 
-        let first = build_library_page(records, &query());
-        let second = build_library_page(reversed, &query());
+        let first = build_library_page(records, Vec::new(), &[], &query());
+        let second = build_library_page(reversed, Vec::new(), &[], &query());
 
         assert_eq!(first.total, 4);
         assert_eq!(
@@ -1370,6 +1440,8 @@ mod tests {
 
         let page = build_library_page(
             records,
+            Vec::new(),
+            &[],
             &LibraryQuery {
                 offset: 500,
                 limit: 25,

@@ -1754,6 +1754,53 @@ impl Repositories {
             .map_err(RepositoryError::Database)
     }
 
+    /// Returns bounded Activity and snapshot evidence explicitly linked to a Skill.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the database is unavailable or persisted values are invalid.
+    pub fn skill_evidence(
+        &self,
+        skill_id: SkillId,
+        limit: u16,
+    ) -> Result<(Vec<ActivityListRecord>, Vec<SnapshotRecord>), RepositoryError> {
+        if limit == 0 || limit > 50 {
+            return Err(RepositoryError::InvalidActivityLimit);
+        }
+        self.database
+            .execute(move |connection| {
+                let skill_id = skill_id.to_string();
+                let mut activities = connection.prepare(
+                    "SELECT id, kind, state, outcome, summary, started_at_ms, completed_at_ms,
+                        operation_id, scan_run_id FROM activity
+                 WHERE json_extract(details_json, '$.skillId') = ?1
+                 ORDER BY started_at_ms DESC, id DESC LIMIT ?2",
+                )?;
+                let activity = activities
+                    .query_map(params![skill_id, i64::from(limit)], activity_list_from_row)?
+                    .collect::<Result<Vec<_>, _>>()?;
+                let mut snapshots = connection.prepare(
+                    "SELECT s.id, s.operation_id, s.retention_state, s.protected, s.created_at_ms
+                 FROM snapshots s JOIN activity a ON a.operation_id = s.operation_id
+                 WHERE json_extract(a.details_json, '$.skillId') = ?1
+                 ORDER BY s.created_at_ms DESC, s.id DESC",
+                )?;
+                let snapshots = snapshots
+                    .query_map([skill_id], |row| {
+                        Ok(SnapshotRecord {
+                            id: parse_text(&row.get::<_, String>(0)?, 0)?,
+                            operation_id: parse_text(&row.get::<_, String>(1)?, 1)?,
+                            retention_state: row.get(2)?,
+                            protected: row.get(3)?,
+                            created_at: parse_millis(row.get(4)?, 4)?,
+                        })
+                    })?
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok((activity, snapshots))
+            })
+            .map_err(RepositoryError::Database)
+    }
+
     /// Finalizes the Operation and its user-facing Activity projection in one FULL transaction.
     ///
     /// # Errors

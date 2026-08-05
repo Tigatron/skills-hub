@@ -44,6 +44,8 @@ Generated bindings add `batch_deployment_plan`, `deployment_undo_plan`, `startup
 
 Generated bindings add `vault_status` and `vault_initialize`. Status reports the active canonical Vault path, default path, and startup-recovery completion without creating files. Initialization accepts an optional absolute selected directory (or uses the default), validates it through the existing Vault safety contract, installs scan/takeover/deployment/Activity services into the live runtime, and runs startup recovery before those services become available. A second initialization in the same process is rejected. `bootstrap_get_state` includes Vault initialization/path fields so first render can branch without inferring filesystem state.
 
+`vault_initialize` is the accepted bootstrap exception to the normal Operation Plan requirement: before a Vault exists there is no durable manager location in which to persist a reviewed plan, journal, or recovery point. The first-run UI therefore requires two explicit user steps. Review names the exact selected path and explains that ordinary working directories plus `.manager` index, manifest, journal, snapshot, and recovery structure will be created; a separate confirmation performs initialization. Initialization does not scan, import, deploy, overwrite, or delete existing Skills, and Rust remains responsible for path validation and the mutation outcome.
+
 # Command groups
 
 Names are provisional but their responsibility is stable:

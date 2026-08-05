@@ -8,6 +8,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use specta::Type;
 use thiserror::Error;
 
@@ -18,33 +19,45 @@ use crate::{
     },
     domain::{
         ActivityId, BundleRelativePath, DeploymentHealth, DeploymentId, DeploymentMode,
-        DurationMillis, ObservationId, OperationId, OperationOutcome, OperationState, SkillId,
-        SkillLifecycle, SnapshotId, TargetId, UtcTimestamp,
+        DurationMillis, ObservationId, OperationId, OperationOutcome, OperationState,
+        OperationTone, SkillId, SkillLifecycle, SnapshotId, TargetId, UtcTimestamp,
     },
     filesystem::{
         AuthorizedRoot, BundleCaps, EntryKind, MetadataFingerprint, copy_bundle_exact, hash_bundle,
         validate_bundle_symlinks,
     },
     operations::{
-        CancellationToken, OperationCoordinator, OperationError, OperationExecutor,
-        OperationFailpoints, OperationFinalizer, OperationHookError, OperationIntent,
-        OperationKind, OperationPlan, OperationPlanContent, OperationPlanner, OperationStore,
-        OwnershipChoice, OwnershipDecision, PathFingerprint, PlanAction, PlanBuilder, PlanPath,
-        PlanStep, RecoverySummary, SnapshotProtection, SnapshotRegistrar, SnapshotRegistration,
-        StagingProvider, TakeoverDecision, TakeoverObservationEvidence, TakeoverObservationStatus,
+        CancellationToken, LocalProvenanceConfidence, LocalProvenanceEvidence, LocalProvenanceKind,
+        OperationCoordinator, OperationError, OperationExecutor, OperationFailpoints,
+        OperationFinalizer, OperationHookError, OperationIntent, OperationKind, OperationPlan,
+        OperationPlanContent, OperationPlanner, OperationStore, OwnershipChoice, OwnershipDecision,
+        PathFingerprint, PlanAction, PlanBuilder, PlanPath, PlanStep, RecoverySummary,
+        SnapshotProtection, SnapshotRegistrar, SnapshotRegistration, StagingProvider,
+        TakeoverDecision, TakeoverObservationEvidence, TakeoverObservationStatus,
         TakeoverPlanContext, TakeoverReplacementEvidence, TakeoverSkillEvidence,
         TakeoverTargetScope, TargetRoots,
     },
     persistence::{
-        ActivityRecord, DeploymentManifest, DeploymentRecord, LocalSourceKind, ObjectRecord,
-        ObservationRecord, OpenVault, OperationRecord, RepositoryError, SkillManifest,
-        SkillManifestSource, SkillRecord, SkillRevisionRecord, SkillSourceRecord,
-        SnapshotItemRecord, SnapshotRecord, SourceConfidence, TakeoverProjection, TargetRecord,
+        ActivityListRecord, ActivityRecord, DeploymentManifest, DeploymentRecord, LocalSourceKind,
+        ObjectRecord, ObservationRecord, OpenVault, OperationRecord, RepositoryError,
+        SkillManifest, SkillManifestProvenance, SkillManifestSource, SkillRecord,
+        SkillRevisionRecord, SkillSourceRecord, SnapshotItemRecord, SnapshotRecord,
+        SourceConfidence, TakeoverProjection, TargetRecord,
     },
 };
 
 const PREVIEW_LIMIT: u64 = 256 * 1024;
 const SNAPSHOT_SCHEMA: u32 = 1;
+const PROVENANCE_PARENT_LIMIT: usize = 8;
+const PROVENANCE_FILE_LIMIT: u64 = 4 * 1024 * 1024;
+const LOCKFILES: [&str; 6] = [
+    "skills-lock.json",
+    "package-lock.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "Cargo.lock",
+    "uv.lock",
+];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -168,6 +181,9 @@ pub struct OperationView {
     pub plan_digest: String,
     pub state: String,
     pub outcome: Option<String>,
+    pub terminal: bool,
+    pub cancellation_allowed: bool,
+    pub tone: OperationTone,
     pub failure: Option<String>,
     pub recovery: Vec<String>,
     pub context: TakeoverOperationContextView,
@@ -216,7 +232,108 @@ pub struct SkillDetail {
     pub deployment_paths: Vec<String>,
     pub observation_paths: Vec<String>,
     pub conflicts: Vec<String>,
-    pub allowed_actions: Vec<String>,
+    pub snapshot: SkillSnapshotSummary,
+    pub activity: Vec<SkillActivitySummary>,
+    pub capabilities: Vec<SkillActionCapability>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillSnapshotSummary {
+    pub available: bool,
+    pub count: u32,
+    pub latest_created_at: Option<String>,
+    pub protected_count: u32,
+    pub unavailable_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillActivitySummary {
+    pub activity_id: String,
+    pub kind: String,
+    pub summary: String,
+    pub operation_id: Option<String>,
+    pub outcome: Option<String>,
+    pub started_at: String,
+    pub undo_check_available: bool,
+    pub undo_check_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillAction {
+    MoveToTrash,
+    Restore,
+    PermanentlyDelete,
+    Preview,
+    Reveal,
+    Deploy,
+    UndoCheck,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillActionCapability {
+    pub action: SkillAction,
+    pub allowed: bool,
+    pub disabled_reason: Option<String>,
+}
+
+fn skill_capabilities(
+    lifecycle: SkillLifecycle,
+    active_deployments: usize,
+    activity: &[ActivityListRecord],
+) -> Vec<SkillActionCapability> {
+    let active = lifecycle == SkillLifecycle::Active;
+    let trashed = lifecycle == SkillLifecycle::Trashed;
+    let undo_check = activity.iter().any(|item| {
+        item.kind == "deploy"
+            && item.outcome.as_deref() == Some("succeeded")
+            && item.operation_id.is_some()
+    });
+    let capability = |action, allowed, reason: &str| SkillActionCapability {
+        action,
+        allowed,
+        disabled_reason: (!allowed).then(|| reason.to_owned()),
+    };
+    vec![
+        capability(
+            SkillAction::MoveToTrash,
+            active,
+            "Only an active Skill can be moved to Trash",
+        ),
+        capability(
+            SkillAction::Restore,
+            trashed,
+            "Only a trashed Skill can be restored",
+        ),
+        capability(
+            SkillAction::PermanentlyDelete,
+            trashed,
+            "Only a trashed Skill can be permanently deleted",
+        ),
+        capability(
+            SkillAction::Preview,
+            active,
+            "Preview is unavailable outside the active working bundle",
+        ),
+        capability(
+            SkillAction::Reveal,
+            active,
+            "The active working location is unavailable",
+        ),
+        capability(
+            SkillAction::Deploy,
+            active,
+            "Only an active Skill can be deployed",
+        ),
+        capability(
+            SkillAction::UndoCheck,
+            undo_check && active_deployments > 0,
+            "No successful active deployment is available for an undo plan check",
+        ),
+    ]
 }
 
 #[derive(Debug, Error)]
@@ -351,6 +468,7 @@ impl TakeoverService {
             .observation(source_id)?
             .ok_or(TakeoverError::ObservationMissing)?;
         let checked_source = inspect_observation(&source, BundleCaps::default())?;
+        let local_provenance = recover_local_provenance(&checked_source.canonical);
         let mut selected = Vec::new();
         let mut selected_ids = BTreeSet::new();
         for choice in &selected_locations {
@@ -544,6 +662,7 @@ impl TakeoverService {
             replacements,
             decision: decision(requested_decision),
             created_at: now,
+            local_provenance,
         };
         let store = OperationStore::open(self.vault.paths.manager())
             .map_err(|e| TakeoverError::Journal(e.to_string()))?;
@@ -757,11 +876,16 @@ impl TakeoverService {
             .as_ref()
             .ok_or_else(|| TakeoverError::Journal("Operation is not a takeover".into()))?;
         let review = plan_view(&stored.plan, takeover);
+        let state = stored.journal.state;
+        let outcome = stored.journal.outcome;
         Ok(OperationView {
             operation_id: id.to_string(),
             plan_digest: stored.plan.plan_digest.to_string(),
-            state: format!("{:?}", stored.journal.state),
-            outcome: stored.journal.outcome.map(|v| format!("{v:?}")),
+            state: format!("{state:?}"),
+            outcome: outcome.map(|value| format!("{value:?}")),
+            terminal: state.is_terminal(),
+            cancellation_allowed: !state.is_terminal(),
+            tone: OperationTone::from_state(state, outcome),
             failure: stored.journal.failure.as_ref().map(|v| v.summary.clone()),
             recovery: stored
                 .journal
@@ -785,6 +909,7 @@ impl TakeoverService {
         })
     }
 
+    #[allow(clippy::too_many_lines)]
     pub fn skill_detail(&self, skill_id: &str) -> Result<SkillDetail, TakeoverError> {
         let id = SkillId::from_str(skill_id).map_err(|e| invalid_id("Skill", &e))?;
         let skill = self
@@ -819,6 +944,7 @@ impl TakeoverService {
             500,
         )?;
         let active = deployments.iter().filter(|v| v.active).count();
+        let (activity_records, snapshots) = self.vault.repositories.skill_evidence(id, 20)?;
         let conflicts = observations
             .iter()
             .filter(|v| v.status != "verified" || v.digest != Some(skill.working_digest))
@@ -830,11 +956,35 @@ impl TakeoverService {
                 )
             })
             .collect();
-        let actions = match skill.lifecycle {
-            SkillLifecycle::Active => vec!["move_to_trash".into()],
-            SkillLifecycle::Trashed => vec!["restore".into(), "permanently_delete".into()],
-            SkillLifecycle::PermanentlyRemoved => Vec::new(),
-        };
+        let capabilities = skill_capabilities(skill.lifecycle, active, &activity_records);
+        let snapshot_count = snapshots.len();
+        let protected_count = snapshots
+            .iter()
+            .filter(|snapshot| snapshot.protected)
+            .count();
+        let latest_snapshot = snapshots
+            .first()
+            .map(|snapshot| snapshot.created_at.to_string());
+        let activity = activity_records
+            .into_iter()
+            .map(|record| {
+                let undo_meaningful = record.kind == "deploy"
+                    && record.outcome.as_deref() == Some("succeeded")
+                    && record.operation_id.is_some();
+                SkillActivitySummary {
+                    activity_id: record.id.to_string(),
+                    kind: record.kind,
+                    summary: record.summary,
+                    operation_id: record.operation_id.map(|value| value.to_string()),
+                    outcome: record.outcome,
+                    started_at: record.started_at.to_string(),
+                    undo_check_available: undo_meaningful,
+                    undo_check_reason: (!undo_meaningful).then(|| {
+                        "Only a successful deployment can be checked for an undo plan".to_owned()
+                    }),
+                }
+            })
+            .collect();
         Ok(SkillDetail {
             skill_id: id.to_string(),
             display_name: skill.display_name,
@@ -858,7 +1008,16 @@ impl TakeoverService {
                 .map(|v| v.display_path.to_string_lossy().into_owned())
                 .collect(),
             conflicts,
-            allowed_actions: actions,
+            snapshot: SkillSnapshotSummary {
+                available: snapshot_count > 0,
+                count: u32::try_from(snapshot_count).unwrap_or(u32::MAX),
+                latest_created_at: latest_snapshot,
+                protected_count: u32::try_from(protected_count).unwrap_or(u32::MAX),
+                unavailable_reason: (snapshot_count == 0)
+                    .then(|| "No retained snapshot evidence is linked to this Skill".to_owned()),
+            },
+            activity,
+            capabilities,
         })
     }
 
@@ -933,6 +1092,97 @@ fn inspect_observation(
     })
 }
 
+fn recover_local_provenance(source: &Path) -> Vec<LocalProvenanceEvidence> {
+    let mut evidence = Vec::new();
+    for root in source.ancestors().take(PROVENANCE_PARENT_LIMIT) {
+        for name in LOCKFILES {
+            let path = root.join(name);
+            if let Some(digest) = digest_safe_regular_file(&path) {
+                evidence.push(LocalProvenanceEvidence {
+                    kind: LocalProvenanceKind::LocalLockfile,
+                    path: path.to_string_lossy().into_owned(),
+                    revision: None,
+                    content_digest: Some(digest),
+                    confidence: LocalProvenanceConfidence::LocalContent,
+                });
+            }
+        }
+        if let Some(revision) = resolve_local_git_head(root) {
+            evidence.push(LocalProvenanceEvidence {
+                kind: LocalProvenanceKind::GitRepositoryCommit,
+                path: root.to_string_lossy().into_owned(),
+                revision: Some(revision),
+                content_digest: None,
+                confidence: LocalProvenanceConfidence::LocalMetadata,
+            });
+            break;
+        }
+    }
+    evidence.truncate(16);
+    evidence
+}
+
+fn digest_safe_regular_file(path: &Path) -> Option<String> {
+    let metadata = fs::symlink_metadata(path).ok()?;
+    if !metadata.is_file()
+        || metadata.file_type().is_symlink()
+        || metadata.len() > PROVENANCE_FILE_LIMIT
+    {
+        return None;
+    }
+    let bytes = fs::read(path).ok()?;
+    Some(format!("sha256:{:x}", Sha256::digest(bytes)))
+}
+
+fn resolve_local_git_head(root: &Path) -> Option<String> {
+    let git = root.join(".git");
+    let metadata = fs::symlink_metadata(&git).ok()?;
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return None;
+    }
+    let head = read_small_metadata(&git.join("HEAD"))?;
+    let head = head.trim();
+    if is_git_hash(head) {
+        return Some(head.to_ascii_lowercase());
+    }
+    let reference = head.strip_prefix("ref: ")?;
+    if !safe_git_ref(reference) {
+        return None;
+    }
+    if let Some(value) = read_small_metadata(&git.join(reference)) {
+        let value = value.trim();
+        if is_git_hash(value) {
+            return Some(value.to_ascii_lowercase());
+        }
+    }
+    let packed = read_small_metadata(&git.join("packed-refs"))?;
+    packed.lines().find_map(|line| {
+        let (hash, name) = line.split_once(' ')?;
+        (name == reference && is_git_hash(hash)).then(|| hash.to_ascii_lowercase())
+    })
+}
+
+fn read_small_metadata(path: &Path) -> Option<String> {
+    let metadata = fs::symlink_metadata(path).ok()?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() > 1024 * 1024 {
+        return None;
+    }
+    fs::read_to_string(path).ok()
+}
+
+fn is_git_hash(value: &str) -> bool {
+    matches!(value.len(), 40 | 64) && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn safe_git_ref(value: &str) -> bool {
+    value.starts_with("refs/")
+        && !value.contains("..")
+        && !value.contains('\\')
+        && value
+            .split('/')
+            .all(|part| !part.is_empty() && part != "." && part != "..")
+}
+
 struct TakeoverBuilder {
     vault: Arc<OpenVault>,
     source: ObservationRecord,
@@ -943,6 +1193,7 @@ struct TakeoverBuilder {
     replacements: Vec<TakeoverReplacementEvidence>,
     decision: TakeoverDecision,
     created_at: UtcTimestamp,
+    local_provenance: Vec<LocalProvenanceEvidence>,
 }
 
 impl PlanBuilder for TakeoverBuilder {
@@ -1077,7 +1328,7 @@ impl PlanBuilder for TakeoverBuilder {
         }
         observations.sort_by_key(|v| v.id);
         observations.dedup_by_key(|v| v.id);
-        let evidence = observations
+        let mut evidence: Vec<_> = observations
             .iter()
             .map(|v| {
                 observation_evidence(
@@ -1089,6 +1340,12 @@ impl PlanBuilder for TakeoverBuilder {
                 )
             })
             .collect();
+        if let Some(source) = evidence
+            .iter_mut()
+            .find(|value| value.observation_id == self.source.id)
+        {
+            source.local_provenance.clone_from(&self.local_provenance);
+        }
         let object_path = object_relative(self.checked_source.digest)
             .map_err(|e| OperationError::InvalidPlan(e.to_string()))?;
         let context = TakeoverPlanContext {
@@ -1219,6 +1476,7 @@ fn observation_evidence(
         entry_kind: checked.map_or(EntryKind::Unsupported, |_| EntryKind::Directory),
         metadata: checked.map(|v| v.metadata),
         raw_symlink_target: None,
+        local_provenance: Vec::new(),
     }
 }
 
@@ -1510,21 +1768,43 @@ impl OperationFinalizer for TakeoverHooks {
             .iter()
             .find(|v| v.observation_id == context.source_observation_id)
             .ok_or_else(|| hook("missing source"))?;
-        let manifest = SkillManifest::new(
+        let manifest_sources = vec![SkillManifestSource {
+            kind: LocalSourceKind::LocalObservation,
+            path: PathBuf::from(&source.display_path),
+            captured_at: source.observed_at,
+            confidence: SourceConfidence::Observed,
+        }];
+        let manifest_provenance = source
+            .local_provenance
+            .iter()
+            .map(|evidence| SkillManifestProvenance {
+                kind: match evidence.kind {
+                    LocalProvenanceKind::GitRepositoryCommit => {
+                        LocalSourceKind::GitRepositoryCommit
+                    }
+                    LocalProvenanceKind::LocalLockfile => LocalSourceKind::LocalLockfile,
+                },
+                path: PathBuf::from(&evidence.path),
+                captured_at: source.observed_at,
+                confidence: match evidence.confidence {
+                    LocalProvenanceConfidence::LocalMetadata => SourceConfidence::LocalMetadata,
+                    LocalProvenanceConfidence::LocalContent => SourceConfidence::LocalContent,
+                },
+                revision: evidence.revision.clone(),
+                content_digest: evidence.content_digest.clone(),
+            })
+            .collect();
+        let mut manifest = SkillManifest::new(
             context.skill.skill_id,
             context.skill.display_name.clone(),
             context.skill.deployment_name.clone(),
             digest,
             digest,
             plan.content.created_at,
-            vec![SkillManifestSource {
-                kind: LocalSourceKind::LocalObservation,
-                path: PathBuf::from(&source.display_path),
-                captured_at: source.observed_at,
-                confidence: SourceConfidence::Observed,
-            }],
+            manifest_sources,
         )
         .map_err(|e| hook(e.to_string()))?;
+        manifest.local_provenance = manifest_provenance;
         self.vault
             .manifests
             .write_skill(&manifest)
@@ -2157,6 +2437,62 @@ mod tests {
 
     fn metadata(path: &Path) -> MetadataFingerprint {
         MetadataFingerprint::from_metadata(&fs::symlink_metadata(path).unwrap())
+    }
+
+    #[test]
+    fn local_provenance_recovers_direct_and_detached_git_heads() {
+        let temporary = tempdir().unwrap();
+        let source = temporary.path().join("repo/skills/example");
+        fs::create_dir_all(&source).unwrap();
+        fs::create_dir_all(temporary.path().join("repo/.git/refs/heads")).unwrap();
+        let commit = "0123456789abcdef0123456789abcdef01234567";
+        fs::write(
+            temporary.path().join("repo/.git/HEAD"),
+            "ref: refs/heads/main\n",
+        )
+        .unwrap();
+        fs::write(temporary.path().join("repo/.git/refs/heads/main"), commit).unwrap();
+        assert_eq!(
+            recover_local_provenance(&source)[0].revision.as_deref(),
+            Some(commit)
+        );
+
+        fs::write(
+            temporary.path().join("repo/.git/HEAD"),
+            format!("{commit}\n"),
+        )
+        .unwrap();
+        assert_eq!(
+            recover_local_provenance(&source)[0].revision.as_deref(),
+            Some(commit)
+        );
+    }
+
+    #[test]
+    fn local_provenance_hashes_lockfiles_and_ignores_absent_or_malformed_metadata() {
+        let temporary = tempdir().unwrap();
+        let source = temporary.path().join("repo/skill");
+        fs::create_dir_all(temporary.path().join("repo/.git")).unwrap();
+        fs::create_dir_all(&source).unwrap();
+        fs::write(
+            temporary.path().join("repo/.git/HEAD"),
+            "ref: ../../unsafe\n",
+        )
+        .unwrap();
+        fs::write(temporary.path().join("repo/skills-lock.json"), "{}\n").unwrap();
+        let evidence = recover_local_provenance(&source);
+        assert_eq!(evidence.len(), 1);
+        assert_eq!(evidence[0].kind, LocalProvenanceKind::LocalLockfile);
+        assert!(
+            evidence[0]
+                .content_digest
+                .as_deref()
+                .unwrap()
+                .starts_with("sha256:")
+        );
+
+        fs::remove_file(temporary.path().join("repo/skills-lock.json")).unwrap();
+        assert!(recover_local_provenance(&source).is_empty());
     }
 
     #[test]

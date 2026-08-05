@@ -23,6 +23,7 @@ const reviewedPlan: TrashPlanView = {
   planDigest: 'digest-1',
   entry,
   blockers: [],
+  executionAllowed: true,
 };
 
 afterEach(() => vi.restoreAllMocks());
@@ -83,6 +84,8 @@ describe('TrashPanel', () => {
       operationId: 'operation-1',
       outcome: 'succeeded',
       replayed: false,
+      succeeded: true,
+      tone: 'success',
     });
     arrange();
 
@@ -103,11 +106,7 @@ describe('TrashPanel', () => {
   it('does not optimistically remove an entry while execution is pending', async () => {
     const user = userEvent.setup();
     vi.spyOn(api, 'trashRestorePlan').mockResolvedValue(reviewedPlan);
-    let resolveExecution!: (value: {
-      operationId: string;
-      outcome: string;
-      replayed: boolean;
-    }) => void;
+    let resolveExecution!: (value: import('../bindings').TrashExecutionView) => void;
     vi.spyOn(api, 'trashExecute').mockImplementation(
       () =>
         new Promise((resolve) => {
@@ -120,7 +119,13 @@ describe('TrashPanel', () => {
     await user.click(await screen.findByRole('button', { name: 'Execute reviewed restore' }));
     expect(screen.getAllByText('Example Skill').length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: /Example Skill/ })).toBeInTheDocument();
-    resolveExecution({ operationId: 'operation-1', outcome: 'succeeded', replayed: false });
+    resolveExecution({
+      operationId: 'operation-1',
+      outcome: 'succeeded',
+      replayed: false,
+      succeeded: true,
+      tone: 'success',
+    });
     await screen.findByText(/durable outcome recorded/);
   });
 
@@ -131,6 +136,8 @@ describe('TrashPanel', () => {
       operationId: 'operation-1',
       outcome: 'rolled_back',
       replayed: true,
+      succeeded: false,
+      tone: 'danger',
     });
     arrange();
 

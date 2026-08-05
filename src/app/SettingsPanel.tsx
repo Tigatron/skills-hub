@@ -296,22 +296,7 @@ function PlanReview({
   onCancel: () => void;
   onExecute: () => void;
 }) {
-  const blockers =
-    review.kind === 'repair'
-      ? review.plan.refused.map((x) => x.detail)
-      : review.kind === 'rebuild'
-        ? review.plan.blockers.map((x) => x.detail)
-        : review.kind === 'gc'
-          ? review.plan.blockers
-          : review.plan.capability.blockers;
-  const allowed =
-    review.kind === 'repair'
-      ? review.plan.writable && blockers.length === 0
-      : review.kind === 'rebuild'
-        ? blockers.length === 0
-        : review.kind === 'gc'
-          ? review.plan.enabled && blockers.length === 0
-          : review.plan.capability.status === 'supported' && blockers.length === 0;
+  const blockers = review.plan.disabledReasons;
   return (
     <div className={styles.review} aria-label={`${review.kind} plan review`}>
       <h3>Review {review.kind} plan</h3>
@@ -344,7 +329,7 @@ function PlanReview({
         <p>No blockers reported.</p>
       )}
       <div className={styles.actions}>
-        <PrimaryButton onPress={onExecute} isDisabled={!allowed || pending}>
+        <PrimaryButton onPress={onExecute} isDisabled={!review.plan.executionAllowed || pending}>
           Execute reviewed plan
         </PrimaryButton>
         <SecondaryButton onPress={onCancel} isDisabled={pending}>
@@ -411,19 +396,19 @@ function AdaptersSection({
               <article className={styles.card} key={descriptor.adapterId}>
                 <div className={styles.cardTitle}>
                   <h3>{descriptor.displayName}</h3>
-                  <StatusPill
-                    tone={
-                      descriptor.confidence.toLowerCase().includes('verified')
-                        ? 'success'
-                        : 'pending'
-                    }
-                  >
+                  <StatusPill tone={descriptor.confidence === 'verified' ? 'success' : 'pending'}>
                     {descriptor.confidence}
                   </StatusPill>
                 </div>
                 <p>{descriptor.caveats || 'No caveats reported.'}</p>
                 <p className={styles.muted}>
                   Verified {date(descriptor.verifiedAt)} · {descriptor.supportedModes.join(', ')}
+                </p>
+                <p>
+                  Official source:{' '}
+                  <a href={descriptor.officialSourceUrl} target="_blank" rel="noreferrer">
+                    {descriptor.officialSourceUrl}
+                  </a>
                 </p>
                 <Checkbox isSelected={draft.enabled} onChange={(enabled) => change({ enabled })}>
                   <span className={styles.checkbox} /> Enabled

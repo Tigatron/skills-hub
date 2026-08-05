@@ -9,8 +9,8 @@ mod vault;
 pub use executor::{DbExecutor, DbExecutorError};
 pub use manifests::{
     Appearance, DeploymentManifest, DeviceSettings, LocalSourceKind, ManifestError, ManifestStore,
-    SkillManifest, SkillManifestSource, SourceConfidence, TrashEntryManifest, TrashPolicy,
-    VaultManifest, read_trash_entry, write_trash_entry,
+    SkillManifest, SkillManifestProvenance, SkillManifestSource, SourceConfidence,
+    TrashEntryManifest, TrashPolicy, VaultManifest, read_trash_entry, write_trash_entry,
 };
 pub use migrations::{DatabaseSettings, MigrationError, replace_database_file};
 pub use repositories::{

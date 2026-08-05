@@ -2,6 +2,8 @@
 
 ## 2026-08-05
 
+- **Acceptance**: Closed the `M0-014` acceptance rework with Rust-owned External/Vaulted/Managed Library rows, snapshot and linked-Activity detail, disabled-action reasons, copy/reveal path controls, typed operation and Trash capabilities/outcomes, virtualized Library rendering, and expanded component/event-scope coverage. The complete gate passed 44 frontend tests, 247 Rust library tests with four intentional crash-helper ignores, strict Clippy, bindings, documentation, and renderer build checks.
+
 - **Implementation**: Completed `M0-014` with real Library, Deployments, Activity, Trash, and Settings integration; persistent Rust-derived setup progress; Workspace coverage controls and diagnostics; adapter overrides and custom targets; reviewed Vault maintenance; guarded Trash lifecycle actions; keyboard-equivalent deployment matrix/list views; and stable persisted Operation Plan JSON export. The closeout gate passed 25 frontend tests, 239 Rust library tests plus bindings/harness coverage with 3 intentional crash-helper ignores, strict Clippy, generated bindings, TypeScript/ESLint, formatting, docs, and renderer build checks. M1 Discover, Collections, and editing remain absent.
 
 - **Implementation**: Completed `M0-013` schema-v5 Trash lifecycle backend and temporary-Vault acceptance coverage. Move, restore, and permanent delete now execute through exact internal-Vault plans with stable Skill identity, provenance retention, protected operation Snapshots, durable Activity, occupied-path restore, exact confirmation/reference blockers, immutable-object/history retention, and terminal replay. Trash-specific undo remains unavailable; completed deployment inverse and drift conflict choices remain the honest user-facing undo contract.

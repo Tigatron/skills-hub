@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Button } from 'react-aria-components';
 
 import { CommandError } from '../lib/api';
@@ -148,10 +148,59 @@ export function MetaRow({ label, value }: { label: string; value: ReactNode }) {
   );
 }
 
-export function PathText({ path }: { path: string }) {
+export function PathText({
+  path,
+  onReveal,
+}: {
+  path: string;
+  onReveal?: () => void | Promise<unknown>;
+}) {
+  const [status, setStatus] = useState<string | null>(null);
+  const copy = async () => {
+    try {
+      if (!navigator.clipboard) throw new Error('Clipboard access is unavailable');
+      await navigator.clipboard.writeText(path);
+      setStatus('Path copied');
+    } catch {
+      setStatus('Could not copy path');
+    }
+  };
+  const reveal = async () => {
+    try {
+      await onReveal?.();
+      setStatus('Revealed in Finder');
+    } catch {
+      setStatus('Could not reveal path');
+    }
+  };
   return (
-    <code className={styles.pathText} title={path}>
-      {path}
-    </code>
+    <span className={styles.pathGroup}>
+      <code className={styles.pathText} title={path}>
+        {path}
+      </code>
+      <span className={styles.pathActions}>
+        <Button
+          className={styles.pathAction!}
+          onPress={() => void copy()}
+          aria-label={`Copy ${path}`}
+        >
+          Copy
+        </Button>
+        {onReveal ? (
+          <Button
+            className={styles.pathAction!}
+            onPress={() => void reveal()}
+            aria-label={`Reveal ${path}`}
+          >
+            Reveal
+          </Button>
+        ) : null}
+      </span>
+      {status ? (
+        <span className={styles.visuallyHidden} aria-live="polite">
+          {status}
+        </span>
+      ) : null}
+    </span>
   );
 }

@@ -202,6 +202,8 @@ pub struct SkillManifest {
     pub baseline_digest: BundleDigest,
     pub created_at: UtcTimestamp,
     pub sources: Vec<SkillManifestSource>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub local_provenance: Vec<SkillManifestProvenance>,
 }
 
 impl SkillManifest {
@@ -234,6 +236,7 @@ impl SkillManifest {
             baseline_digest,
             created_at,
             sources,
+            local_provenance: Vec::new(),
         })
     }
 }
@@ -277,6 +280,17 @@ pub struct SkillManifestSource {
     pub confidence: SourceConfidence,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SkillManifestProvenance {
+    pub kind: LocalSourceKind,
+    pub path: PathBuf,
+    pub captured_at: UtcTimestamp,
+    pub confidence: SourceConfidence,
+    pub revision: Option<String>,
+    pub content_digest: Option<String>,
+}
+
 impl SkillManifestSource {
     fn validate(&self) -> Result<(), String> {
         if !self.path.is_absolute() {
@@ -290,12 +304,16 @@ impl SkillManifestSource {
 #[serde(rename_all = "kebab-case")]
 pub enum LocalSourceKind {
     LocalObservation,
+    GitRepositoryCommit,
+    LocalLockfile,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SourceConfidence {
     Observed,
+    LocalMetadata,
+    LocalContent,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
