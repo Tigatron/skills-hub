@@ -12,7 +12,7 @@ timestamp: 2026-07-23T00:00:00Z
 
 | Field | Value |
 | --- | --- |
-| Status | Implemented |
+| Status | Complete (2026-08-05) |
 | Dependencies | M0-004 |
 | PRD coverage | SCN-04/05/06/07/08/09; watcher foundation later reused for VLT-05 |
 | Design | [Scanning and reconciliation](../workflows/scanning-and-reconciliation.md), [Target adapters](../interfaces/target-adapters.md), [Filesystem safety](../security/filesystem-safety.md), [Tauri/UI contract](../interfaces/tauri-and-ui-state.md) |
@@ -119,7 +119,7 @@ Completed on 2026-08-05 through the existing generic scanner and Operation kerne
 
 | Field | Value |
 | --- | --- |
-| Status | Implemented |
+| Status | Complete (2026-08-05) |
 | Dependencies | M0-003, M0-008 |
 | PRD coverage | VLT-05/06/07/08 |
 | Design | [Vault and SQLite](../storage/vault-and-sqlite.md), [Bundle objects and retention](../storage/bundle-hashing-and-objects.md), [Operation model](../domain/operation-recovery-and-trash.md), [Transaction execution](../workflows/transaction-execution.md) |

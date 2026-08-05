@@ -54,6 +54,8 @@ export function DeploymentsPanel() {
       api.targetRegisterFixture({
         kind: fixtureKind,
         selectedDirectory: fixturePath.trim(),
+        adapterId: 'universal-agent-skills',
+        isOverride: false,
       }),
     onSuccess: async () => {
       setFixturePath('');
