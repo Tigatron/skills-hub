@@ -2,6 +2,7 @@ use std::{
     ffi::OsString,
     fs::{self, File, OpenOptions},
     io::{self, Write},
+    os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
 };
 
@@ -26,6 +27,7 @@ where
 {
     let parent = path.parent().ok_or(DurableWriteError::MissingParent)?;
     let temporary = temporary_sibling(path)?;
+    let mut temporary_identity = None;
     let result = (|| {
         let mut file = OpenOptions::new()
             .write(true)
@@ -33,6 +35,8 @@ where
             .open(&temporary)?;
         file.write_all(bytes)?;
         file.sync_all()?;
+        let metadata = file.metadata()?;
+        temporary_identity = Some((metadata.dev(), metadata.ino()));
         before_rename()?;
         fs::rename(&temporary, path)?;
         sync_directory(parent)?;
@@ -40,12 +44,20 @@ where
     })();
 
     if result.is_err() {
-        match fs::remove_file(&temporary) {
-            Ok(()) => {
+        let owned = temporary_identity.is_some_and(|(device, inode)| {
+            fs::symlink_metadata(&temporary).is_ok_and(|metadata| {
+                metadata.is_file()
+                    && !metadata.file_type().is_symlink()
+                    && metadata.dev() == device
+                    && metadata.ino() == inode
+            })
+        });
+        match owned.then(|| fs::remove_file(&temporary)) {
+            Some(Ok(())) => {
                 let _ = sync_directory(parent);
             }
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(_) => {}
+            Some(Err(error)) if error.kind() == io::ErrorKind::NotFound => {}
+            Some(Err(_)) | None => {}
         }
     }
     result.map_err(DurableWriteError::Io)
@@ -111,6 +123,34 @@ mod tests {
         assert!(matches!(error, DurableWriteError::Io(_)));
         assert_eq!(fs::read(&path).unwrap(), b"old-complete");
         assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn atomic_failure_never_deletes_a_replacement_at_the_temporary_path() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("manifest.json");
+        fs::write(&path, b"old-complete").unwrap();
+        let displaced = directory.path().join("displaced-staging");
+        let mut replacement = None;
+
+        let _ = atomic_write_with(&path, b"new-complete", || {
+            let temporary = fs::read_dir(directory.path())?
+                .map(Result::unwrap)
+                .map(|entry| entry.path())
+                .find(|candidate| candidate != &path)
+                .expect("temporary sibling exists");
+            fs::rename(&temporary, &displaced)?;
+            fs::write(&temporary, b"unrelated replacement")?;
+            replacement = Some(temporary);
+            Err(io::Error::other("injected replacement"))
+        });
+
+        assert_eq!(fs::read(&path).unwrap(), b"old-complete");
+        assert_eq!(fs::read(&displaced).unwrap(), b"new-complete");
+        assert_eq!(
+            fs::read(replacement.unwrap()).unwrap(),
+            b"unrelated replacement"
+        );
     }
 
     #[test]

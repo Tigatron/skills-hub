@@ -6543,13 +6543,16 @@ mod tests {
             std::env::var("SKILLS_HUB_DEPLOY_CHILD_OPERATION").expect("child operation ID");
         let plan_digest =
             std::env::var("SKILLS_HUB_DEPLOY_CHILD_DIGEST").expect("child plan digest");
+        let boundary =
+            if std::env::var("SKILLS_HUB_DEPLOY_CHILD_BOUNDARY").as_deref() == Ok("backup") {
+                OperationBoundary::BackupRenamed(0)
+            } else {
+                OperationBoundary::FinalRenamed(0)
+            };
         let vault = Arc::new(OpenVault::open(Path::new(&vault_root), &support, &[]).unwrap());
         let service = DeploymentService::new(vault).with_test_hooks(
             Arc::new(FilesystemCapabilityProbe),
-            Arc::new(CrashAt {
-                boundary: OperationBoundary::FinalRenamed(0),
-                marker,
-            }),
+            Arc::new(CrashAt { boundary, marker }),
         );
         let _ = service.execute_operation(&operation_id, &plan_digest);
         panic!("child deployment execution returned before parent killed it");
@@ -6660,5 +6663,86 @@ mod tests {
             fs::read(store.journal_path(operation_id)).unwrap(),
             terminal_journal
         );
+    }
+
+    #[test]
+    fn child_process_kill_reopens_and_finishes_undeploy_idempotently() {
+        let fixture = fixture();
+        let target = target(&fixture, "remove-copy", FixtureTargetKindDto::GitProject);
+        let deployed = plan(&fixture, &target, None);
+        execute(&fixture, &deployed);
+        let reviewed = fixture
+            .service
+            .plan_undeploy(&UndeployPlanRequest {
+                deployment_id: deployed.deployment_id.clone(),
+                resolution: UndeployResolutionDto::RemoveManaged,
+            })
+            .unwrap();
+        let target_path = PathBuf::from(&deployed.target_path);
+        let deployment_id = DeploymentId::from_str(&deployed.deployment_id).unwrap();
+        let Fixture {
+            temporary,
+            vault,
+            service,
+            skill_id: _,
+            working: _,
+        } = fixture;
+        let vault_root = vault.paths.root().to_path_buf();
+        let support = temporary.path().join("support");
+        drop(service);
+        drop(vault);
+
+        let marker = temporary.path().join("undeploy-crash-ready");
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "application::deployment::tests::deployment_crash_child_helper",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env("SKILLS_HUB_DEPLOY_CHILD_VAULT", &vault_root)
+            .env("SKILLS_HUB_DEPLOY_CHILD_SUPPORT", &support)
+            .env("SKILLS_HUB_DEPLOY_CHILD_MARKER", &marker)
+            .env("SKILLS_HUB_DEPLOY_CHILD_OPERATION", &reviewed.operation_id)
+            .env("SKILLS_HUB_DEPLOY_CHILD_DIGEST", &reviewed.plan_digest)
+            .env("SKILLS_HUB_DEPLOY_CHILD_BOUNDARY", "backup")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(15);
+        while !marker.exists() {
+            assert!(
+                Instant::now() < deadline,
+                "child did not reach the durable undeploy rename boundary"
+            );
+            assert!(child.try_wait().unwrap().is_none(), "child exited early");
+            thread::sleep(Duration::from_millis(20));
+        }
+        child.kill().unwrap();
+        assert!(!child.wait().unwrap().success());
+
+        let vault = Arc::new(OpenVault::open(&vault_root, &support, &[]).unwrap());
+        let recovery = DeploymentService::new(Arc::clone(&vault));
+        let operation_id = OperationId::from_str(&reviewed.operation_id).unwrap();
+        assert!(matches!(
+            recovery.recover_operation(operation_id),
+            Err(DeploymentError::Operation(
+                OperationError::ExecutionFailedRolledBack(_)
+            ))
+        ));
+        assert!(target_path.is_dir());
+        assert!(
+            vault
+                .repositories
+                .deployment(deployment_id)
+                .unwrap()
+                .is_some_and(|deployment| deployment.active)
+        );
+        let second = recovery.recover_operation(operation_id).unwrap();
+        assert_eq!(second.outcome, OperationOutcome::FailedRolledBack);
+        assert!(second.replayed);
+        assert!(target_path.is_dir());
     }
 }

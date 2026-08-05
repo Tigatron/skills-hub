@@ -267,6 +267,9 @@ impl VersionedManifest for SkillManifest {
         for source in &self.sources {
             source.validate()?;
         }
+        for provenance in &self.local_provenance {
+            provenance.validate()?;
+        }
         Ok(())
     }
 }
@@ -298,6 +301,47 @@ impl SkillManifestSource {
         }
         Ok(())
     }
+}
+
+impl SkillManifestProvenance {
+    fn validate(&self) -> Result<(), String> {
+        if !self.path.is_absolute() {
+            return Err("Skill provenance path must be absolute".to_owned());
+        }
+        match self.kind {
+            LocalSourceKind::GitRepositoryCommit
+                if self.confidence == SourceConfidence::LocalMetadata
+                    && self.content_digest.is_none()
+                    && self.revision.as_deref().is_some_and(valid_git_hash) =>
+            {
+                Ok(())
+            }
+            LocalSourceKind::LocalLockfile
+                if self.confidence == SourceConfidence::LocalContent
+                    && self.revision.is_none()
+                    && self
+                        .content_digest
+                        .as_deref()
+                        .is_some_and(valid_sha256_digest) =>
+            {
+                Ok(())
+            }
+            _ => Err("Skill provenance kind, confidence, and evidence disagree".to_owned()),
+        }
+    }
+}
+
+fn valid_git_hash(value: &str) -> bool {
+    matches!(value.len(), 40 | 64)
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn valid_sha256_digest(value: &str) -> bool {
+    value
+        .strip_prefix("sha256:")
+        .is_some_and(|encoded| encoded.len() == 64 && valid_git_hash(encoded))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -569,6 +613,30 @@ mod tests {
             store.write_skill(&invalid),
             Err(ManifestError::InvalidValue { .. })
         ));
+    }
+
+    #[test]
+    fn skill_manifest_rejects_inconsistent_local_provenance() {
+        let mut manifest = SkillManifest::new(
+            SkillId::generate(),
+            "Name".to_owned(),
+            DeploymentName::parse("name").unwrap(),
+            digest(1),
+            digest(1),
+            UtcTimestamp::from_unix_millis(1_000).unwrap(),
+            Vec::new(),
+        )
+        .unwrap();
+        manifest.local_provenance.push(SkillManifestProvenance {
+            kind: LocalSourceKind::GitRepositoryCommit,
+            path: PathBuf::from("relative/repository"),
+            captured_at: UtcTimestamp::from_unix_millis(1_000).unwrap(),
+            confidence: SourceConfidence::LocalContent,
+            revision: Some("not-a-commit".into()),
+            content_digest: Some("sha256:not-a-digest".into()),
+        });
+
+        assert!(manifest.validate().is_err());
     }
 
     #[test]

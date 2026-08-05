@@ -18,6 +18,10 @@ M0 does not claim to sandbox an agent after deployment and does not implement th
 
 The generic Operation executor now enforces the mutation subset of this contract. Before each backup, final, rollback-aside, and backup-restore rename it revalidates root containment, sealed parent identity, source fingerprint, and destination fingerprint, then uses descriptor-relative no-replace rename. Exact journal-recorded cleanup additionally requires containment, operation/kind marker, durable file identity, and content proof; failed proof preserves the artifact and records the failure. Product-specific target authorization and action construction remain M0-006/M0-007, and M0-008 remains responsible for startup action execution.
 
+# M0-015 hardening evidence
+
+The cleanup audit extended exact ownership proof to lifecycle paths outside the generic executor. Relocation staging and old-Vault cleanup bind reviewed device/inode identity, Vault ID, operation-derived exact path, and marker evidence. Old-Vault cleanup atomically quarantines the reviewed source before recursive removal and restores it if post-rename identity changed. GC recovery reconstructs the sole operation/digest-derived pending-delete path and rejects copied ownership evidence elsewhere. Capability probes and durable-write temporary files remove only the same regular non-link inode they created; replacement content is preserved. Product child-process and failpoint matrices exercise takeover, deploy, undeploy, Trash, restore, and relocation recovery without widening cleanup scope.
+
 # Trust boundaries
 
 | Boundary | Trust decision |
@@ -85,6 +89,8 @@ These checks reduce time-of-check/time-of-use races. A hostile process running a
 - Permanent delete is valid only for a Skill already in application Trash and after secondary confirmation.
 - Broad `remove_dir_all` is allowed only on a verified application-owned staging/object/Trash root, never on a user-selected target root.
 - Cleanup requires the exact journal-recorded artifact path, containment, matching operation-and-kind marker, and usable fingerprint/file identity including content proof before recursive removal. A marker alone is never authority; forged markers and replaced inode/content are preserved as recovery evidence.
+- A reviewed old Vault is renamed without replacement to its exact operation-derived quarantine sibling before recursive removal; identity is rechecked after rename, and a mismatch is restored rather than deleted.
+- Capability probes and temporary atomic-write files are removed only when the originally captured device/inode still names the expected non-link entry.
 - A cleanup failure is logged and left for targeted retry; it never expands deletion scope.
 
 # Vault and target nesting

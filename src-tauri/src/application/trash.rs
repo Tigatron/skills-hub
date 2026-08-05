@@ -1601,6 +1601,24 @@ mod tests {
         }
     }
 
+    struct ParkAt {
+        boundary: OperationBoundary,
+        marker: PathBuf,
+    }
+
+    impl OperationFailpoints for ParkAt {
+        fn check(&self, boundary: OperationBoundary) -> Result<(), OperationHookError> {
+            if boundary == self.boundary {
+                crate::filesystem::durable::atomic_write(&self.marker, b"ready")
+                    .map_err(|error| hook(error.to_string()))?;
+                loop {
+                    std::thread::sleep(std::time::Duration::from_secs(60));
+                }
+            }
+            Ok(())
+        }
+    }
+
     fn fixture() -> Fixture {
         let temporary = tempdir().unwrap();
         let vault = Arc::new(
@@ -1830,6 +1848,169 @@ mod tests {
                 expected,
                 "{boundary:?}"
             );
+        }
+    }
+
+    #[test]
+    fn restore_shared_boundary_failures_preserve_exact_trashed_content() {
+        for boundary in [
+            OperationBoundary::SnapshotPublished,
+            OperationBoundary::StageActionApplied(1),
+            OperationBoundary::FinalRenamed(1),
+            OperationBoundary::VerifyObserved(0),
+        ] {
+            let fixture = fixture();
+            let (trashed, _) = move_to_trash(&fixture);
+            let trash_path = fixture
+                .vault
+                .paths
+                .trash_entry(fixture.skill_id, trashed.entry.entry_id.parse().unwrap());
+            let expected = tree_bytes(&trash_path);
+            let plan = fixture
+                .service
+                .plan_restore(&TrashEntryRequest {
+                    entry_id: trashed.entry.entry_id,
+                })
+                .unwrap();
+
+            let result =
+                service_failing_at(&fixture, boundary).execute_restore(&TrashExecuteRequest {
+                    operation_id: plan.operation_id,
+                    plan_digest: plan.plan_digest,
+                });
+
+            assert!(result.is_err(), "{boundary:?}");
+            assert!(trash_path.is_dir(), "{boundary:?}");
+            assert_eq!(tree_bytes(&trash_path), expected, "{boundary:?}");
+            assert!(!fixture.working_container.exists(), "{boundary:?}");
+        }
+    }
+
+    #[test]
+    #[ignore = "invoked only by child_process_kill_reopens_move_and_restore_idempotently"]
+    fn trash_crash_child_helper() {
+        let Ok(vault_root) = std::env::var("SKILLS_HUB_TRASH_CHILD_VAULT") else {
+            return;
+        };
+        let support = PathBuf::from(
+            std::env::var("SKILLS_HUB_TRASH_CHILD_SUPPORT").expect("child support path"),
+        );
+        let marker = PathBuf::from(
+            std::env::var("SKILLS_HUB_TRASH_CHILD_MARKER").expect("child marker path"),
+        );
+        let request = TrashExecuteRequest {
+            operation_id: std::env::var("SKILLS_HUB_TRASH_CHILD_OPERATION")
+                .expect("child operation ID"),
+            plan_digest: std::env::var("SKILLS_HUB_TRASH_CHILD_DIGEST").expect("child plan digest"),
+        };
+        let action = std::env::var("SKILLS_HUB_TRASH_CHILD_ACTION").expect("child action");
+        let vault = Arc::new(OpenVault::open(Path::new(&vault_root), &support, &[]).unwrap());
+        let service = TrashService::with_runtime(vault, Arc::new(OperationCoordinator::new()))
+            .unwrap()
+            .with_failpoints(Arc::new(ParkAt {
+                boundary: OperationBoundary::FinalRenamed(1),
+                marker,
+            }));
+        match action.as_str() {
+            "move" => {
+                let _ = service.execute_move_to_trash(&request);
+            }
+            "restore" => {
+                let _ = service.execute_restore(&request);
+            }
+            _ => panic!("unsupported child Trash action"),
+        }
+        panic!("child Trash execution returned before parent killed it");
+    }
+
+    #[test]
+    fn child_process_kill_reopens_move_and_restore_idempotently() {
+        use std::process::{Command, Stdio};
+
+        for action in ["move", "restore"] {
+            let fixture = fixture();
+            let (plan, trash_path) = if action == "move" {
+                let plan = fixture
+                    .service
+                    .plan_move_to_trash(&TrashPlanRequest {
+                        skill_id: fixture.skill_id.to_string(),
+                    })
+                    .unwrap();
+                let entry = plan.entry.entry_id.parse().unwrap();
+                (
+                    plan,
+                    fixture.vault.paths.trash_entry(fixture.skill_id, entry),
+                )
+            } else {
+                let (trashed, _) = move_to_trash(&fixture);
+                let trash_path = fixture
+                    .vault
+                    .paths
+                    .trash_entry(fixture.skill_id, trashed.entry.entry_id.parse().unwrap());
+                let plan = fixture
+                    .service
+                    .plan_restore(&TrashEntryRequest {
+                        entry_id: trashed.entry.entry_id,
+                    })
+                    .unwrap();
+                (plan, trash_path)
+            };
+            let Fixture {
+                _temporary: temporary,
+                vault,
+                service,
+                working_container,
+                ..
+            } = fixture;
+            let vault_root = vault.paths.root().to_path_buf();
+            let support = temporary.path().join("support");
+            drop(service);
+            drop(vault);
+            let marker = temporary.path().join(format!("trash-{action}-crash-ready"));
+            let mut child = Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "application::trash::tests::trash_crash_child_helper",
+                    "--ignored",
+                    "--nocapture",
+                ])
+                .env("SKILLS_HUB_TRASH_CHILD_VAULT", &vault_root)
+                .env("SKILLS_HUB_TRASH_CHILD_SUPPORT", &support)
+                .env("SKILLS_HUB_TRASH_CHILD_MARKER", &marker)
+                .env("SKILLS_HUB_TRASH_CHILD_OPERATION", &plan.operation_id)
+                .env("SKILLS_HUB_TRASH_CHILD_DIGEST", &plan.plan_digest)
+                .env("SKILLS_HUB_TRASH_CHILD_ACTION", action)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+            while !marker.exists() {
+                assert!(std::time::Instant::now() < deadline, "child did not park");
+                assert!(child.try_wait().unwrap().is_none(), "child exited early");
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            child.kill().unwrap();
+            assert!(!child.wait().unwrap().success());
+
+            let reopened = Arc::new(OpenVault::open(&vault_root, &support, &[]).unwrap());
+            let recovery =
+                TrashService::with_runtime(reopened, Arc::new(OperationCoordinator::new()))
+                    .unwrap();
+            let operation_id = plan.operation_id.parse().unwrap();
+            let first = recovery.recover_operation(operation_id).unwrap();
+            let second = recovery.recover_operation(operation_id).unwrap();
+            assert!(first.state.is_terminal(), "{action}");
+            assert_eq!(second.outcome, first.outcome, "{action}");
+            assert!(second.replayed, "{action}");
+            if action == "move" {
+                assert!(trash_path.is_dir());
+                assert!(!working_container.exists());
+            } else {
+                assert!(working_container.is_dir());
+                assert!(!trash_path.exists());
+            }
         }
     }
 

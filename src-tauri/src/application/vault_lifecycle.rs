@@ -56,6 +56,7 @@ enum LifecycleBoundary {
     LinksIntentPersisted,
     LinksRewritten,
     Finalized,
+    OldVaultCleanupIntentPersisted,
 }
 
 trait LifecycleFailpoints: Send + Sync {
@@ -1012,6 +1013,7 @@ impl VaultLifecycleService {
             self.checkpoint(LifecycleBoundary::MutationIntentPersisted)?;
             self.vault.database.checkpoint_for_replacement()?;
             fs::create_dir(&staging)?;
+            let staging_metadata = fs::symlink_metadata(&staging)?;
             durable_json(&staging.join(".relocation-owner.json"), &serde_json::json!({
                 "operationId": operation_id, "vaultId": plan.vault_id, "source": plan.old_vault_path
             }))?;
@@ -1022,6 +1024,8 @@ impl VaultLifecycleService {
                     &destination,
                     operation_id,
                     &plan.vault_id,
+                    staging_metadata.dev(),
+                    staging_metadata.ino(),
                 )?;
                 durable_json(&directory.join("relocate-journal.json"), &serde_json::json!({
                     "operationId": operation_id, "planDigest": digest, "state": "failed_rolled_back",
@@ -1038,6 +1042,17 @@ impl VaultLifecycleService {
             self.checkpoint(LifecycleBoundary::DestinationPublished)?;
             lifecycle_journal.steps[0].observed_complete = true;
             durable_json(&directory.join("journal.json"), &lifecycle_journal)?;
+            let destination_directory = destination
+                .join(".manager")
+                .join(LIFECYCLE_OPERATIONS_DIRECTORY)
+                .join(operation_id.to_string());
+            if !destination_directory.is_dir() {
+                return Err(LifecycleError::IntegrityFailed);
+            }
+            durable_json(
+                &destination_directory.join("journal.json"),
+                &lifecycle_journal,
+            )?;
 
             let settings_path = self.settings_path()?;
             let old_settings: DeviceSettings = read_settings(&settings_path)?;
@@ -1050,6 +1065,10 @@ impl VaultLifecycleService {
                 precondition_verified: true, observed_complete: false,
             });
             durable_json(&directory.join("journal.json"), &lifecycle_journal)?;
+            durable_json(
+                &destination_directory.join("journal.json"),
+                &lifecycle_journal,
+            )?;
             self.checkpoint(LifecycleBoundary::SettingsIntentPersisted)?;
             write_settings(&settings_path, &new_settings)?;
             if read_settings(&settings_path)?.active_vault_path != destination {
@@ -1063,6 +1082,10 @@ impl VaultLifecycleService {
                 precondition_verified: true, observed_complete: false,
             });
             durable_json(&directory.join("journal.json"), &lifecycle_journal)?;
+            durable_json(
+                &destination_directory.join("journal.json"),
+                &lifecycle_journal,
+            )?;
             self.checkpoint(LifecycleBoundary::LinksIntentPersisted)?;
             let result = rewrite_managed_links(self.vault.as_ref(), &destination, operation_id);
             let rewritten = match result {
@@ -1070,26 +1093,51 @@ impl VaultLifecycleService {
                 Err((error, changed)) => {
                     for (target, old_link, _) in changed.iter().rev() { let _ = replace_symlink(target, old_link); }
                     let _ = write_settings(&settings_path, &old_settings);
-                    durable_json(&directory.join("relocate-journal.json"), &serde_json::json!({
+                    let compensated = serde_json::json!({
                         "operationId": operation_id, "planDigest": digest, "state": "failed_compensated",
                         "authority": plan.old_vault_path, "destinationVerified": true,
                         "resumeClassification": "rollback_complete_restart_cutover", "error": error.to_string()
-                    }))?;
+                    });
+                    durable_json(&directory.join("relocate-journal.json"), &compensated)?;
+                    durable_json(
+                        &destination_directory.join("relocate-journal.json"),
+                        &compensated,
+                    )?;
+                    lifecycle_journal.state = LifecycleState::FailedRolledBack;
+                    lifecycle_journal.error = Some(error.to_string());
+                    durable_json(&directory.join("journal.json"), &lifecycle_journal)?;
+                    durable_json(
+                        &destination_directory.join("journal.json"),
+                        &lifecycle_journal,
+                    )?;
                     return Err(error);
                 }
             };
             self.checkpoint(LifecycleBoundary::LinksRewritten)?;
             lifecycle_journal.steps[2].observed_complete = true;
             durable_json(&directory.join("journal.json"), &lifecycle_journal)?;
+            durable_json(
+                &destination_directory.join("journal.json"),
+                &lifecycle_journal,
+            )?;
             let confirmed: DeviceSettings = read_settings(&settings_path)?;
             if confirmed.active_vault_path != destination { return Err(LifecycleError::CutoverFailed("settings verification failed".into())); }
-            durable_json(&directory.join("relocate-journal.json"), &serde_json::json!({
+            let completed = serde_json::json!({
                 "operationId": operation_id, "planDigest": digest, "state": "succeeded_restart_required",
                 "authority": destination, "oldVaultRetained": true, "rewrittenSymlinks": rewritten,
                 "resumeClassification": "complete"
-            }))?;
+            });
+            durable_json(&directory.join("relocate-journal.json"), &completed)?;
+            durable_json(
+                &destination_directory.join("relocate-journal.json"),
+                &completed,
+            )?;
             lifecycle_journal.state = LifecycleState::Succeeded;
             durable_json(&directory.join("journal.json"), &lifecycle_journal)?;
+            durable_json(
+                &destination_directory.join("journal.json"),
+                &lifecycle_journal,
+            )?;
             self.checkpoint(LifecycleBoundary::Finalized)?;
             Ok(VaultRelocateResult { operation_id: operation_id.to_string(), old_vault_path: plan.old_vault_path,
                 active_vault_path: plan.destination_path, rewritten_symlinks: rewritten, restart_required: true,
@@ -1186,9 +1234,33 @@ impl VaultLifecycleService {
                     source: Some(old.clone()), destination: None, intent_persisted: true,
                     precondition_verified: true, observed_complete: false }], error: None };
             durable_json(&dir.join("journal.json"), &journal)?;
-            make_tree_writable(&old)?; fs::remove_dir_all(&old)?;
+            self.checkpoint(LifecycleBoundary::OldVaultCleanupIntentPersisted)?;
+            let quarantine = cleanup_quarantine_path(&old, operation_id)?;
+            if quarantine.exists() {
+                return Err(LifecycleError::StalePlan);
+            }
+            fs::rename(&old, &quarantine)?;
             sync_parent(&old)?;
-            if old.exists() { return Err(LifecycleError::IntegrityFailed); }
+            journal.steps[0].destination = Some(quarantine.clone());
+            durable_json(&dir.join("journal.json"), &journal)?;
+            let quarantined_metadata = fs::symlink_metadata(&quarantine)?;
+            let quarantined_manifest: crate::persistence::VaultManifest = serde_json::from_slice(
+                &fs::read(quarantine.join(".manager/vault.json"))?,
+            )?;
+            if quarantined_metadata.file_type().is_symlink()
+                || quarantined_metadata.dev().to_string() != plan.old_vault_device
+                || quarantined_metadata.ino().to_string() != plan.old_vault_inode
+                || quarantined_manifest.vault_id.to_string() != plan.vault_id
+            {
+                if !old.exists() {
+                    fs::rename(&quarantine, &old)?;
+                    sync_parent(&old)?;
+                }
+                return Err(LifecycleError::StalePlan);
+            }
+            fs::remove_dir_all(&quarantine)?;
+            sync_parent(&quarantine)?;
+            if old.exists() || quarantine.exists() { return Err(LifecycleError::IntegrityFailed); }
             journal.steps[0].observed_complete = true;
             journal.state = LifecycleState::Succeeded;
             durable_json(&dir.join("journal.json"), &journal)?;
@@ -1423,7 +1495,6 @@ impl VaultLifecycleService {
                         observed_complete: false,
                     });
                     durable_json(&directory.join("journal.json"), &journal)?;
-                    make_tree_writable(&exact)?;
                     fs::remove_dir_all(&exact)?;
                     fs::remove_file(exact.with_extension("owner.json"))?;
                     sync_parent(&exact)?;
@@ -1719,18 +1790,7 @@ impl VaultLifecycleService {
                             plan.candidates.get(step.order as usize).ok_or_else(|| {
                                 LifecycleError::AmbiguousLifecycleEvidence(directory.to_path_buf())
                             })?;
-                        let owner: OperationId = candidate
-                            .pending_owner_operation_id
-                            .as_deref()
-                            .ok_or_else(|| LifecycleError::UnsafeGcPath(source.clone()))?
-                            .parse()
-                            .map_err(|_| LifecycleError::UnsafeGcPath(source.clone()))?;
-                        let digest: BundleDigest = candidate
-                            .digest
-                            .parse()
-                            .map_err(|_| LifecycleError::UnsafeGcPath(source.clone()))?;
-                        verify_pending_owner(source, owner, digest)?;
-                        make_tree_writable(source)?;
+                        verify_gc_recovery_delete(self.vault.paths.manager(), source, candidate)?;
                         fs::remove_dir_all(source)?;
                         let owner_path = source.with_extension("owner.json");
                         if owner_path.exists() {
@@ -2071,6 +2131,14 @@ fn relocation_staging(destination: &Path, id: OperationId) -> Result<PathBuf, Li
     Ok(destination.with_file_name(format!(".{name}.relocating-{id}")))
 }
 
+fn cleanup_quarantine_path(path: &Path, id: OperationId) -> Result<PathBuf, LifecycleError> {
+    let name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| LifecycleError::UnsafeRelocation("invalid old Vault name".into()))?;
+    Ok(path.with_file_name(format!(".{name}.cleanup-{id}")))
+}
+
 fn capability_preflight(
     destination: &Path,
     id: OperationId,
@@ -2080,6 +2148,7 @@ fn capability_preflight(
         .parent()
         .ok_or_else(|| LifecycleError::UnsafeRelocation("destination has no parent".into()))?;
     let probe = parent.join(format!(".skills-hub-capability-{id}"));
+    let mut probe_identity = None;
     let mut report = DestinationCapabilityReport {
         status: CapabilityStatus::Unknown,
         write_file: false,
@@ -2099,6 +2168,8 @@ fn capability_preflight(
     };
     let result = (|| -> Result<(), std::io::Error> {
         fs::create_dir(&probe)?;
+        let metadata = fs::symlink_metadata(&probe)?;
+        probe_identity = Some((metadata.dev(), metadata.ino()));
         report.create_directory = true;
         let file_path = probe.join("probe");
         let mut file = OpenOptions::new()
@@ -2157,11 +2228,37 @@ fn capability_preflight(
     } else {
         CapabilityStatus::Unknown
     };
-    if probe.exists() {
-        fs::remove_dir_all(&probe)?;
+    if let Some((device, inode)) = probe_identity {
+        cleanup_capability_probe(&probe, device, inode)?;
         sync_parent(&probe)?;
     }
     Ok(report)
+}
+
+fn cleanup_capability_probe(
+    probe: &Path,
+    expected_device: u64,
+    expected_inode: u64,
+) -> Result<(), LifecycleError> {
+    let metadata = fs::symlink_metadata(probe)?;
+    if metadata.file_type().is_symlink()
+        || !metadata.is_dir()
+        || metadata.dev() != expected_device
+        || metadata.ino() != expected_inode
+    {
+        return Err(LifecycleError::StalePlan);
+    }
+    for name in ["probe", "renamed", "link", "CaseProbe"] {
+        let path = probe.join(name);
+        match fs::symlink_metadata(&path) {
+            Ok(metadata) if !metadata.is_dir() => fs::remove_file(path)?,
+            Ok(_) => return Err(LifecycleError::StalePlan),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    fs::remove_dir(probe)?;
+    Ok(())
 }
 
 fn tree_size(root: &Path) -> Result<u64, LifecycleError> {
@@ -2220,10 +2317,16 @@ fn cleanup_owned_staging(
     destination: &Path,
     id: OperationId,
     vault_id: &str,
+    expected_device: u64,
+    expected_inode: u64,
 ) -> Result<(), LifecycleError> {
+    let metadata = fs::symlink_metadata(path)?;
     if path != relocation_staging(destination, id)?
         || path.parent() != destination.parent()
-        || fs::symlink_metadata(path)?.file_type().is_symlink()
+        || metadata.file_type().is_symlink()
+        || !metadata.is_dir()
+        || metadata.dev() != expected_device
+        || metadata.ino() != expected_inode
     {
         return Err(LifecycleError::UnsafeRelocation(
             "staging path is not the exact operation-owned sibling".into(),
@@ -2238,7 +2341,6 @@ fn cleanup_owned_staging(
             "staging ownership is not proven".into(),
         ));
     }
-    make_tree_writable(path)?;
     fs::remove_dir_all(path)?;
     sync_parent(path)
 }
@@ -2589,6 +2691,29 @@ fn verify_pending_owner(
     Ok(())
 }
 
+fn verify_gc_recovery_delete(
+    manager: &Path,
+    source: &Path,
+    candidate: &ObjectGcCandidate,
+) -> Result<(), LifecycleError> {
+    let owner: OperationId = candidate
+        .pending_owner_operation_id
+        .as_deref()
+        .ok_or_else(|| LifecycleError::UnsafeGcPath(source.to_path_buf()))?
+        .parse()
+        .map_err(|_| LifecycleError::UnsafeGcPath(source.to_path_buf()))?;
+    let digest: BundleDigest = candidate
+        .digest
+        .parse()
+        .map_err(|_| LifecycleError::UnsafeGcPath(source.to_path_buf()))?;
+    let expected = pending_gc_path(manager, owner, &candidate.digest);
+    if source != Path::new(&candidate.exact_path) || source != expected {
+        return Err(LifecycleError::UnsafeGcPath(source.to_path_buf()));
+    }
+    verify_exact_directory(source, &expected, &manager.join("pending-delete"))?;
+    verify_pending_owner(source, owner, digest)
+}
+
 fn verify_exact_directory(path: &Path, expected: &Path, root: &Path) -> Result<(), LifecycleError> {
     let metadata = fs::symlink_metadata(path)?;
     if path != expected
@@ -2718,19 +2843,6 @@ fn create_pending_parent(pending: &Path) -> Result<(), LifecycleError> {
         .parent()
         .ok_or_else(|| LifecycleError::UnsafeGcPath(pending.to_path_buf()))?;
     fs::create_dir_all(parent)?;
-    Ok(())
-}
-
-fn make_tree_writable(root: &Path) -> Result<(), LifecycleError> {
-    for entry in fs::read_dir(root)? {
-        let path = entry?.path();
-        if fs::symlink_metadata(&path)?.is_dir() {
-            make_tree_writable(&path)?;
-        }
-    }
-    let mut permissions = fs::metadata(root)?.permissions();
-    permissions.set_mode(permissions.mode() | 0o700);
-    fs::set_permissions(root, permissions)?;
     Ok(())
 }
 
@@ -2864,6 +2976,27 @@ mod gc_tests {
             } else {
                 Ok(())
             }
+        }
+    }
+
+    struct ReplaceOldVaultAtCleanupIntent {
+        old: PathBuf,
+        displaced: PathBuf,
+    }
+
+    impl LifecycleFailpoints for ReplaceOldVaultAtCleanupIntent {
+        fn check(&self, boundary: LifecycleBoundary) -> Result<(), LifecycleError> {
+            if boundary != LifecycleBoundary::OldVaultCleanupIntentPersisted {
+                return Ok(());
+            }
+            fs::rename(&self.old, &self.displaced)?;
+            fs::create_dir_all(self.old.join(".manager"))?;
+            fs::copy(
+                self.displaced.join(".manager/vault.json"),
+                self.old.join(".manager/vault.json"),
+            )?;
+            fs::write(self.old.join("foreign-only"), b"replacement")?;
+            Ok(())
         }
     }
 
@@ -3207,6 +3340,43 @@ mod gc_tests {
     }
 
     #[test]
+    fn gc_recovery_rejects_a_complete_owned_object_copied_to_another_path() {
+        let temporary = tempfile::tempdir().unwrap();
+        let manager = temporary.path().join(".manager");
+        let owner = OperationId::generate();
+        let copied = manager.join("pending-delete/copied/object");
+        fs::create_dir_all(copied.join("bundle")).unwrap();
+        fs::write(copied.join("bundle/SKILL.md"), b"copied object\n").unwrap();
+        let digest = hash_bundle(&copied.join("bundle"), BundleCaps::default())
+            .unwrap()
+            .digest;
+        durable_json(
+            &copied.join("object.json"),
+            &serde_json::json!({"digest": digest}),
+        )
+        .unwrap();
+        durable_json(
+            &copied.with_extension("owner.json"),
+            &serde_json::json!({"operationId": owner, "digest": digest}),
+        )
+        .unwrap();
+        let candidate = ObjectGcCandidate {
+            digest: digest.to_string(),
+            exact_path: copied.to_string_lossy().into_owned(),
+            created_at: UtcTimestamp::now().to_string(),
+            retention_deadline: UtcTimestamp::now().to_string(),
+            pending_owner_operation_id: Some(owner.to_string()),
+        };
+        let before = tree_bytes(&copied);
+
+        assert!(matches!(
+            verify_gc_recovery_delete(&manager, &copied, &candidate),
+            Err(LifecycleError::UnsafeGcPath(_))
+        ));
+        assert_eq!(tree_bytes(&copied), before);
+    }
+
+    #[test]
     fn durable_reference_scanning_blocks_truncated_digests() {
         let mut references = BTreeSet::new();
         assert!(matches!(
@@ -3256,6 +3426,25 @@ mod gc_tests {
     }
 
     #[test]
+    fn relocation_read_only_parent_is_blocked_without_probe_artifacts() {
+        let temporary = tempfile::tempdir().unwrap();
+        let parent = temporary.path().join("read-only");
+        fs::create_dir(&parent).unwrap();
+        let original = fs::metadata(&parent).unwrap().permissions();
+        let mut read_only = original.clone();
+        read_only.set_mode(0o555);
+        fs::set_permissions(&parent, read_only).unwrap();
+        let destination = parent.join("Vault-Moved");
+
+        let report = capability_preflight(&destination, OperationId::generate(), 1).unwrap();
+
+        fs::set_permissions(&parent, original).unwrap();
+        assert_eq!(report.status, CapabilityStatus::Unsupported);
+        assert!(!report.blockers.is_empty());
+        assert!(fs::read_dir(&parent).unwrap().next().is_none());
+    }
+
+    #[test]
     fn relocation_durable_boundary_matrix_is_idempotent_and_preserves_source() {
         for boundary in [
             LifecycleBoundary::MutationIntentPersisted,
@@ -3277,7 +3466,7 @@ mod gc_tests {
             let service = VaultLifecycleService::with_runtime(
                 Arc::clone(&vault),
                 Arc::new(OperationCoordinator::new()),
-                support,
+                support.clone(),
             )
             .with_failpoints(Arc::new(FailLifecycleAt(boundary)));
             let plan = service.plan_relocate(&destination).unwrap();
@@ -3294,15 +3483,22 @@ mod gc_tests {
                 "{boundary:?}"
             );
             let before_recovery = (
-                destination.exists().then(|| tree_bytes(&destination)),
+                destination
+                    .exists()
+                    .then(|| fs::read(destination.join("preserve")).unwrap()),
                 PathBuf::from(&plan.staging_path)
                     .exists()
                     .then(|| tree_bytes(Path::new(&plan.staging_path))),
             );
+            drop(service);
+            drop(vault);
+            let settings: DeviceSettings = read_settings(&support.join("settings.json")).unwrap();
+            let active =
+                Arc::new(OpenVault::open(&settings.active_vault_path, &support, &[]).unwrap());
             let recovery = VaultLifecycleService::with_runtime(
-                Arc::clone(&vault),
+                active,
                 Arc::new(OperationCoordinator::new()),
-                temporary.path().join("support"),
+                support,
             );
             let first = recovery.recover_startup().unwrap();
             assert_eq!(first.operations.len(), 1, "{boundary:?}");
@@ -3316,7 +3512,9 @@ mod gc_tests {
                 "{boundary:?}"
             );
             let after_first = (
-                destination.exists().then(|| tree_bytes(&destination)),
+                destination
+                    .exists()
+                    .then(|| fs::read(destination.join("preserve")).unwrap()),
                 PathBuf::from(&plan.staging_path)
                     .exists()
                     .then(|| tree_bytes(Path::new(&plan.staging_path))),
@@ -3327,7 +3525,9 @@ mod gc_tests {
             assert_eq!(
                 after_first,
                 (
-                    destination.exists().then(|| tree_bytes(&destination)),
+                    destination
+                        .exists()
+                        .then(|| fs::read(destination.join("preserve")).unwrap()),
                     PathBuf::from(&plan.staging_path)
                         .exists()
                         .then(|| tree_bytes(Path::new(&plan.staging_path))),
@@ -3488,6 +3688,61 @@ mod gc_tests {
     }
 
     #[test]
+    fn old_vault_swap_after_delete_intent_is_quarantined_then_restored_without_deletion() {
+        let temporary = tempfile::tempdir().unwrap();
+        let old = temporary.path().join("Vault");
+        let support = temporary.path().join("support");
+        let destination = temporary.path().join("Vault-Moved");
+        let vault = Arc::new(OpenVault::open(&old, &support, &[]).unwrap());
+        fs::write(old.join("original-only"), b"reviewed").unwrap();
+        let service = VaultLifecycleService::with_runtime(
+            Arc::clone(&vault),
+            Arc::new(OperationCoordinator::new()),
+            support.clone(),
+        );
+        let relocation = service.plan_relocate(&destination).unwrap();
+        service
+            .execute_relocate(
+                relocation.operation_id.parse().unwrap(),
+                &relocation.plan_digest,
+            )
+            .unwrap();
+        drop(service);
+        drop(vault);
+
+        let displaced = temporary.path().join("reviewed-old-vault");
+        let active = Arc::new(OpenVault::open(&destination, &support, &[]).unwrap());
+        let cleanup_service = VaultLifecycleService::with_runtime(
+            active,
+            Arc::new(OperationCoordinator::new()),
+            support,
+        )
+        .with_failpoints(Arc::new(ReplaceOldVaultAtCleanupIntent {
+            old: old.clone(),
+            displaced: displaced.clone(),
+        }));
+        let cleanup = cleanup_service.plan_old_vault_cleanup(&old).unwrap();
+
+        assert!(matches!(
+            cleanup_service.execute_old_vault_cleanup(
+                cleanup.operation_id.parse().unwrap(),
+                &cleanup.plan_digest,
+            ),
+            Err(LifecycleError::StalePlan)
+        ));
+        assert_eq!(
+            fs::read(displaced.join("original-only")).unwrap(),
+            b"reviewed"
+        );
+        assert_eq!(fs::read(old.join("foreign-only")).unwrap(), b"replacement");
+        assert!(
+            !cleanup_quarantine_path(&old, cleanup.operation_id.parse().unwrap())
+                .unwrap()
+                .exists()
+        );
+    }
+
+    #[test]
     fn relocation_refuses_nested_destination_and_cleanup_requires_exact_digest() {
         let temporary = tempfile::tempdir().unwrap();
         let source = temporary.path().join("Vault");
@@ -3530,9 +3785,17 @@ mod gc_tests {
         )
         .unwrap();
         let before = tree_bytes(&impostor);
+        let metadata = fs::symlink_metadata(&impostor).unwrap();
 
         assert!(matches!(
-            cleanup_owned_staging(&impostor, &destination, operation_id, "same-id"),
+            cleanup_owned_staging(
+                &impostor,
+                &destination,
+                operation_id,
+                "same-id",
+                metadata.dev(),
+                metadata.ino(),
+            ),
             Err(LifecycleError::UnsafeRelocation(_))
         ));
         assert_eq!(tree_bytes(&impostor), before);

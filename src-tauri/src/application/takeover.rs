@@ -2,11 +2,12 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
     io::Read,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
     str::FromStr,
     sync::{Arc, Mutex},
 };
 
+use rustix::fs::{Mode, OFlags, open, openat};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use specta::Type;
@@ -1123,24 +1124,14 @@ fn recover_local_provenance(source: &Path) -> Vec<LocalProvenanceEvidence> {
 }
 
 fn digest_safe_regular_file(path: &Path) -> Option<String> {
-    let metadata = fs::symlink_metadata(path).ok()?;
-    if !metadata.is_file()
-        || metadata.file_type().is_symlink()
-        || metadata.len() > PROVENANCE_FILE_LIMIT
-    {
-        return None;
-    }
-    let bytes = fs::read(path).ok()?;
+    let parent = path.parent()?;
+    let name = Path::new(path.file_name()?);
+    let bytes = read_bounded_regular_file(parent, name, PROVENANCE_FILE_LIMIT)?;
     Some(format!("sha256:{:x}", Sha256::digest(bytes)))
 }
 
 fn resolve_local_git_head(root: &Path) -> Option<String> {
-    let git = root.join(".git");
-    let metadata = fs::symlink_metadata(&git).ok()?;
-    if !metadata.is_dir() || metadata.file_type().is_symlink() {
-        return None;
-    }
-    let head = read_small_metadata(&git.join("HEAD"))?;
+    let head = read_small_git_metadata(root, Path::new("HEAD"))?;
     let head = head.trim();
     if is_git_hash(head) {
         return Some(head.to_ascii_lowercase());
@@ -1149,25 +1140,56 @@ fn resolve_local_git_head(root: &Path) -> Option<String> {
     if !safe_git_ref(reference) {
         return None;
     }
-    if let Some(value) = read_small_metadata(&git.join(reference)) {
+    if let Some(value) = read_small_git_metadata(root, Path::new(reference)) {
         let value = value.trim();
         if is_git_hash(value) {
             return Some(value.to_ascii_lowercase());
         }
     }
-    let packed = read_small_metadata(&git.join("packed-refs"))?;
+    let packed = read_small_git_metadata(root, Path::new("packed-refs"))?;
     packed.lines().find_map(|line| {
         let (hash, name) = line.split_once(' ')?;
         (name == reference && is_git_hash(hash)).then(|| hash.to_ascii_lowercase())
     })
 }
 
-fn read_small_metadata(path: &Path) -> Option<String> {
-    let metadata = fs::symlink_metadata(path).ok()?;
-    if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() > 1024 * 1024 {
-        return None;
+fn read_small_git_metadata(root: &Path, relative: &Path) -> Option<String> {
+    let bytes = read_bounded_regular_file(root, &Path::new(".git").join(relative), 1024 * 1024)?;
+    String::from_utf8(bytes).ok()
+}
+
+fn read_bounded_regular_file(root: &Path, relative: &Path, limit: u64) -> Option<Vec<u8>> {
+    let directory_flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+    let mut directory = open(root, directory_flags, Mode::empty()).ok()?;
+    let mut components = relative.components().peekable();
+    while let Some(component) = components.next() {
+        let Component::Normal(name) = component else {
+            return None;
+        };
+        if components.peek().is_some() {
+            directory = openat(&directory, name, directory_flags, Mode::empty()).ok()?;
+            continue;
+        }
+        let file = openat(
+            &directory,
+            name,
+            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .ok()?;
+        let mut file = fs::File::from(file);
+        let metadata = file.metadata().ok()?;
+        if !metadata.is_file() || metadata.len() > limit {
+            return None;
+        }
+        let mut bytes = Vec::new();
+        file.by_ref()
+            .take(limit.saturating_add(1))
+            .read_to_end(&mut bytes)
+            .ok()?;
+        return (u64::try_from(bytes.len()).ok()? <= limit).then_some(bytes);
     }
-    fs::read_to_string(path).ok()
+    None
 }
 
 fn is_git_hash(value: &str) -> bool {
@@ -2492,6 +2514,32 @@ mod tests {
         );
 
         fs::remove_file(temporary.path().join("repo/skills-lock.json")).unwrap();
+        assert!(recover_local_provenance(&source).is_empty());
+    }
+
+    #[test]
+    fn local_provenance_never_follows_lockfile_or_git_metadata_symlinks() {
+        let temporary = tempdir().unwrap();
+        let source = temporary.path().join("repo/skill");
+        let outside = temporary.path().join("outside");
+        fs::create_dir_all(temporary.path().join("repo/.git")).unwrap();
+        fs::create_dir_all(outside.join("heads")).unwrap();
+        fs::create_dir_all(&source).unwrap();
+        let commit = "0123456789abcdef0123456789abcdef01234567";
+        fs::write(
+            temporary.path().join("repo/.git/HEAD"),
+            "ref: refs/heads/main\n",
+        )
+        .unwrap();
+        fs::write(outside.join("heads/main"), commit).unwrap();
+        fs::write(outside.join("lock"), "private dependency data").unwrap();
+        std::os::unix::fs::symlink(&outside, temporary.path().join("repo/.git/refs")).unwrap();
+        std::os::unix::fs::symlink(
+            outside.join("lock"),
+            temporary.path().join("repo/skills-lock.json"),
+        )
+        .unwrap();
+
         assert!(recover_local_provenance(&source).is_empty());
     }
 
@@ -3833,5 +3881,15 @@ mod tests {
             after, before,
             "startup classification must be read-only and idempotent"
         );
+
+        let recovery = TakeoverService::new(Arc::clone(&vault));
+        let recovered = recovery.recover_operation(operation_id).unwrap();
+        assert_eq!(recovered.outcome, OperationOutcome::Succeeded);
+        let terminal_link = fs::read_link(&selected).unwrap();
+        let replay = recovery.recover_operation(operation_id).unwrap();
+        assert_eq!(replay.outcome, recovered.outcome);
+        assert!(replay.replayed);
+        assert_eq!(fs::read_link(&selected).unwrap(), terminal_link);
+        assert_eq!(fs::read(source.join("SKILL.md")).unwrap(), b"reviewed\n");
     }
 }

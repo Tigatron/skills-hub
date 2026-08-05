@@ -795,6 +795,14 @@ mod tests {
             hash_bundle(bundle.path(), caps),
             Err(BundleHashError::SingleFileLimitExceeded { .. })
         ));
+        let caps = BundleCaps {
+            maximum_total_file_bytes: 2,
+            ..BundleCaps::default()
+        };
+        assert!(matches!(
+            hash_bundle(bundle.path(), caps),
+            Err(BundleHashError::TotalFileLimitExceeded)
+        ));
     }
 
     #[cfg(unix)]

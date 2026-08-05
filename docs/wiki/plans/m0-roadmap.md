@@ -44,7 +44,7 @@ M0-004 + M0-007 ──────▶ M0-011 Six adapters + custom targets ✓
 M0-003 + M0-008 ──────▶ M0-012 ✓ Vault lifecycle
 M0-008 + M0-012 ──────▶ M0-013 Trash + restore + undo ✓
 M0-009..M0-013 ───────▶ M0-014 Complete M0 UI ✓
-M0-008..M0-014 ───────▶ M0-015 Filesystem/reliability hardening
+M0-008..M0-014 ───────▶ M0-015 Filesystem/reliability hardening ✓
 M0-014 + M0-015 ──────▶ M0-016 Accessibility + performance
 M0-016 ────────────────▶ M0-017 Acceptance + packaging
 ```

@@ -1111,6 +1111,11 @@ fn validate_takeover(
                 (observation.target_scope, observation.project_id),
                 (TakeoverTargetScope::Global, None) | (TakeoverTargetScope::Project, Some(_))
             )
+            || observation.local_provenance.len() > 16
+            || observation
+                .local_provenance
+                .iter()
+                .any(|evidence| !valid_local_provenance(evidence))
         {
             return invalid();
         }
@@ -1344,6 +1349,40 @@ fn validate_takeover(
         return invalid();
     }
     Ok(())
+}
+
+fn valid_local_provenance(evidence: &LocalProvenanceEvidence) -> bool {
+    if !Path::new(&evidence.path).is_absolute() {
+        return false;
+    }
+    match evidence.kind {
+        LocalProvenanceKind::GitRepositoryCommit => {
+            evidence.confidence == LocalProvenanceConfidence::LocalMetadata
+                && evidence.content_digest.is_none()
+                && evidence.revision.as_deref().is_some_and(valid_git_hash)
+        }
+        LocalProvenanceKind::LocalLockfile => {
+            evidence.confidence == LocalProvenanceConfidence::LocalContent
+                && evidence.revision.is_none()
+                && evidence
+                    .content_digest
+                    .as_deref()
+                    .is_some_and(valid_sha256_digest)
+        }
+    }
+}
+
+fn valid_git_hash(value: &str) -> bool {
+    matches!(value.len(), 40 | 64)
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn valid_sha256_digest(value: &str) -> bool {
+    value
+        .strip_prefix("sha256:")
+        .is_some_and(|encoded| encoded.len() == 64 && valid_git_hash(encoded))
 }
 
 #[allow(clippy::too_many_lines)]

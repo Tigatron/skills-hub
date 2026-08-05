@@ -70,7 +70,7 @@ The source observation and every physical alias of its directory are never eligi
 
 # Local provenance recovery
 
-M0 stores the observed path and capture time. As a best-effort P1 enhancement, it may inspect parent Git metadata or known local lockfiles without network access. Recovered repository/commit data is labeled with evidence and confidence; absence or ambiguity never blocks takeover and never becomes verified publisher identity.
+M0 stores the observed path and capture time and performs best-effort local provenance recovery. It walks bounded parents for Git `HEAD`/loose-ref/packed-ref metadata and known lockfiles, reads only bounded regular files with descriptor-relative no-follow opens, and performs no network request. Git revisions and lockfile SHA-256 digests carry local-metadata/local-content confidence labels in the sealed plan and Skill manifest. Structural validation rejects malformed kind/confidence/evidence combinations. Absence, ambiguity, unreadable metadata, or links never block takeover and never become verified publisher identity.
 
 # Deployment mode selection
 

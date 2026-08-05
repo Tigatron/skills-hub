@@ -156,6 +156,8 @@ The process-lifetime runtime runs this action driver while opening the configure
 
 Cleanup may touch only exact stage/backup paths recorded by the journal and proven to live under an authorized operation or target parent. Orphan cleanup requires retention expiry, an ownership marker/fingerprint, no live journal reference, and containment verification. Failure to clean is Activity evidence, not a reason for a broader recursive retry.
 
+M0-015 applies the same contract to specialized lifecycle cleanup: the exact reviewed old Vault is first quarantined by operation-derived no-replace rename and its device/inode is rechecked before recursive deletion; relocation staging binds path, operation marker, Vault identity, and inode; GC recovery accepts only the operation/digest-derived pending-delete path; and capability/atomic-write temporary artifacts are removed only while the created inode remains. Copied markers and path replacements are retained for recovery rather than treated as cleanup authority.
+
 # Failpoints
 
 Production code exposes test-only deterministic failpoints after each durable boundary:

@@ -12,7 +12,7 @@ timestamp: 2026-07-23T00:00:00Z
 
 | Field | Value |
 | --- | --- |
-| Status | Planned |
+| Status | Complete (2026-08-05) |
 | Dependencies | M0-008, M0-009, M0-010, M0-011, M0-012, M0-013, M0-014 |
 | PRD coverage | IMP-08 (implementation); hardening evidence for SCN-04, IMP-04/06, DPL-06/07/08, DEL-04/06 and PRD §14.3/§17.3 |
 | Design | [Filesystem safety](../security/filesystem-safety.md), [Transaction execution](../workflows/transaction-execution.md), [Takeover and deployment](../workflows/takeover-and-deployment.md), [Testing and acceptance](../quality/testing-and-acceptance.md) |
@@ -51,6 +51,20 @@ This task hardens and evidences existing contracts; it changes behavior only whe
 
 - The consolidated suites above, wired as one required gate in CI alongside the per-task suites they extend.
 - Regression tests for every defect found during hardening, attached to the owning module.
+
+## Implementation evidence
+
+- The shared executor's full stage/backup/final/verify/finalization/rollback failpoint matrix remains the authoritative durable-boundary cross-product. Product recovery tests connect takeover, deploy, undeploy, Trash, restore, permanent delete, and batch plans to that kernel; real child-process kill/reopen tests now cover takeover, deploy, undeploy, Trash, and restore. The separate relocation executor has its own complete injected-boundary matrix plus child-process kill/reopen and idempotent destination-journal recovery.
+- Adversarial replacement tests preserve content when a relocation source Vault, GC pending object, lifecycle staging tree, capability probe, or atomic-write temporary file no longer has its reviewed path and device/inode identity. Old-Vault removal first renames the exact reviewed Vault to an operation-derived quarantine sibling, revalidates identity, and restores a raced replacement rather than deleting it.
+- Local provenance recovery reads bounded Git `HEAD`/ref and known lockfile evidence without following links or making network requests. Plans and Skill manifests structurally validate evidence kind, confidence, digest/revision, and absolute source path; absent, ambiguous, or linked metadata does not block takeover.
+- Preflight and no-write evidence covers Bundle entry/depth/single-file/total-byte caps, create/write/rename/link capability, capacity, inaccessible roots, read-only parents, stale source/destination/authority, unsupported or changed capability, and Vault/Target containment. Error-envelope regression tests require a stable code, safe redacted message, and next action for actionable failures.
+- Final gate: `cargo fmt --check`, strict all-target/all-feature Clippy, 256 Rust library tests with five intentional child-helper ignores, generated binding and harness tests, and the full `pnpm check` repository gate pass.
+
+## Deliberately consolidated or deferred coverage
+
+- Child-kill tests do not duplicate every generic executor boundary for every product kind. The exhaustive shared failpoint matrix proves those mechanics; each product kind has connection/finalization coverage, and destructive representative boundaries have real process-kill evidence. Undeploy killed after backup rename reaches the documented safe rolled-back outcome with the target preserved.
+- Real read-only-volume mounts and unreliable/network filesystem mounts are environment-dependent and are not created by the portable suite. Read-only-parent, capability, capacity, containment, identity-replacement, and unsupported/unknown capability cases provide deterministic no-mutation evidence.
+- A new structured tracing/rotation/export subsystem was deliberately not introduced while hardening existing contracts because no local tracing sink exists yet. The 25 MB/seven-day, redacted, local-only diagnostic-export deliverable remains an explicit release-gap for M0-017 and is not claimed by this evidence.
 
 ## Risks and recovery
 
