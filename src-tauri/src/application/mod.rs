@@ -5,5 +5,3 @@ pub(crate) mod activity;
 pub(crate) mod deployment;
 pub(crate) mod scanning;
 pub(crate) mod takeover;
-pub(crate) mod vault_lifecycle;
-pub(crate) mod vault_lifecycle;

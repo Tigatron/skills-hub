@@ -4,6 +4,7 @@ use std::{
     future::Future,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
+    sync::atomic::{AtomicBool, Ordering as AtomicOrdering},
 };
 
 use serde::Serialize;
@@ -18,6 +19,7 @@ use crate::{
         deployment::DeploymentService,
         scanning::{ScanJobs, ScanningService},
         takeover::TakeoverService,
+        vault_lifecycle::{LifecycleRecoveryEvidence, VaultLifecycleService},
     },
     operations::{OperationCoordinator, OperationStore},
     persistence::{
@@ -64,6 +66,7 @@ impl AppRuntime {
             home,
             scan_jobs: ScanJobs::default(),
             services: Arc::new(Mutex::new(services)),
+            restart_required: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -165,6 +168,18 @@ impl AppRuntime {
     pub(crate) fn activity_service(&self) -> Result<Arc<ActivityService>, RuntimeStateError> {
         self.ensure_startup_recovery()?;
         Ok(self.services()?.activity)
+    }
+
+    pub(crate) fn vault_lifecycle_service(
+        &self,
+    ) -> Result<VaultLifecycleService, RuntimeStateError> {
+        self.ensure_startup_recovery()?;
+        let services = self.services()?;
+        Ok(VaultLifecycleService::with_runtime(
+            services.vault,
+            services.coordinator,
+            default_application_support(&self.home_path()?),
+        ))
     }
 
     pub(crate) fn startup_recovery_status(
@@ -311,7 +326,7 @@ struct RuntimeServicesSnapshot {
 pub(crate) struct RuntimeVaultSummary {
     pub root_path: PathBuf,
     pub vault_id: String,
-        if self.restart_required.load(Ordering::Acquire) {
+        if self.restart_required.load(AtomicOrdering::Acquire) {
             return Err(RuntimeStateError::RestartRequired);
         }
 }
@@ -321,7 +336,7 @@ pub(crate) struct RuntimeVaultStatus {
     pub startup_recovery_completed: Option<bool>,
 }
     pub(crate) fn enter_restart_required(&self) {
-        self.restart_required.store(true, Ordering::Release);
+        self.restart_required.store(true, AtomicOrdering::Release);
     }
 
 
