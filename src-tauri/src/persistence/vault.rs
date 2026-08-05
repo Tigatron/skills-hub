@@ -108,7 +108,7 @@ impl VaultPaths {
     #[must_use]
     pub fn trash_entry_manifest(&self, skill_id: SkillId, entry_id: TrashEntryId) -> PathBuf {
         let _ = skill_id;
-        self.trash().join(format!("{entry_id}.json"))
+        self.trash_entry(skill_id, entry_id).join("manifest.json")
     }
 
     fn required_directories(&self) -> Vec<PathBuf> {

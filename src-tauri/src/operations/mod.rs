@@ -7,11 +7,12 @@ mod planner;
 mod recovery;
 
 pub use executor::{
-    CancellationToken, NoopOperationEventSink, NoopOperationFailpoints, OperationBoundary,
-    OperationCoordinator, OperationError, OperationErrorCode, OperationErrorEnvelope,
-    OperationEvent, OperationEventSink, OperationExecution, OperationExecutor, OperationFailpoints,
-    OperationFinalizer, OperationHookError, SnapshotRegistrar, SnapshotRegistration,
-    StagingProvider, SuggestedAction, TargetRoots,
+    CancellationToken, NoopOperationEventSink, NoopOperationFailpoints, NoopOperationPreflight,
+    OperationBoundary, OperationCoordinator, OperationError, OperationErrorCode,
+    OperationErrorEnvelope, OperationEvent, OperationEventSink, OperationExecution,
+    OperationExecutor, OperationFailpoints, OperationFinalizer, OperationHookError,
+    OperationPreflight, SnapshotRegistrar, SnapshotRegistration, StagingProvider, SuggestedAction,
+    TargetRoots,
 };
 pub use journal::{
     JournalError, OperationFailure, OperationJournal, OperationStore, PhaseEvidence, PhaseStatus,

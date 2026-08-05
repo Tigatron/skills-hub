@@ -20,10 +20,10 @@ use crate::{
     operations::{
         CancellationToken, OperationCoordinator, OperationError, OperationExecutor,
         OperationFinalizer, OperationHookError, OperationIntent, OperationKind, OperationPlan,
-        OperationPlanContent, OperationPlanner, OperationStore, PathFingerprint, PlanAction,
-        PlanBuilder, PlanPath, PlanStep, RecoverySummary, SnapshotProtection, SnapshotRegistrar,
-        SnapshotRegistration, StagingProvider, TargetRoots, TrashAction, TrashPlanContext,
-        TrashRetentionPolicy,
+        OperationPlanContent, OperationPlanner, OperationPreflight, OperationStore,
+        PathFingerprint, PlanAction, PlanBuilder, PlanPath, PlanStep, RecoverySummary,
+        SnapshotProtection, SnapshotRegistrar, SnapshotRegistration, StagingProvider, TargetRoots,
+        TrashAction, TrashPlanContext, TrashRetentionPolicy,
     },
     persistence::{
         ObjectRecord, OpenVault, RepositoryError, SkillRecord, TrashEntryManifest, TrashPolicy,
@@ -210,12 +210,7 @@ impl TrashService {
         Ok(TrashPlanView {
             operation_id: operation_id.to_string(),
             plan_digest: plan.plan_digest.to_string(),
-            entry: entry_view(
-                &skill,
-                entry_id,
-                c.retention_deadline.expect("30 day retention"),
-                &c.protected_reference_ids,
-            ),
+            entry: reviewed_entry_view(&skill, entry_id, plan.content.created_at, c),
             blockers: vec![],
         })
     }
@@ -224,27 +219,7 @@ impl TrashService {
         &self,
         request: &TrashExecuteRequest,
     ) -> Result<TrashExecutionView, TrashError> {
-        let id = OperationId::from_str(&request.operation_id)
-            .map_err(|e| TrashError::InvalidId(e.to_string()))?;
-        let stored = self
-            .store
-            .load(id)
-            .map_err(|e| TrashError::Evidence(e.to_string()))?;
-        if stored.plan.plan_digest.to_string() != request.plan_digest {
-            return Err(TrashError::Evidence(
-                "plan digest differs from reviewed plan".into(),
-            ));
-        }
-        let execution = self.executor(&stored.plan)?.execute(
-            id,
-            stored.plan.plan_digest,
-            &CancellationToken::default(),
-        )?;
-        Ok(TrashExecutionView {
-            operation_id: id.to_string(),
-            outcome: format!("{:?}", execution.outcome).to_lowercase(),
-            replayed: execution.replayed,
-        })
+        self.execute_checked(request, OperationKind::MoveToTrash)
     }
 
     /// Plans restoration from exact, self-contained Trash evidence.
@@ -309,7 +284,7 @@ impl TrashService {
         let builder = RestoreBuilder {
             vault: Arc::clone(&self.vault),
             skill: skill.clone(),
-            manifest,
+            manifest: manifest.clone(),
             destination,
             now,
         };
@@ -329,7 +304,7 @@ impl TrashService {
         Ok(TrashPlanView {
             operation_id: operation_id.to_string(),
             plan_digest: plan.plan_digest.to_string(),
-            entry: entry_view(&skill, entry_id, now, &[]),
+            entry: manifest_view(&manifest),
             blockers: vec![],
         })
     }
@@ -570,8 +545,9 @@ impl TrashService {
             roots,
             hooks.clone(),
             hooks.clone(),
-            hooks,
-        ))
+            hooks.clone(),
+        )
+        .with_preflight(hooks))
     }
 
     fn execute_checked(
@@ -736,7 +712,13 @@ impl PlanBuilder for PermanentDeleteBuilder {
                 self.skill.id
             ))
             .map_err(|e| OperationError::InvalidPlan(e.to_string()))?,
-            provenance_paths: vec![],
+            provenance_paths: vec![
+                BundleRelativePath::parse(&format!(
+                    ".manager/manifests/skills/{}.json",
+                    self.skill.id
+                ))
+                .map_err(|e| OperationError::InvalidPlan(e.to_string()))?,
+            ],
             working_digest: self.manifest.working_digest,
             baseline_digest: self.manifest.baseline_digest,
             active_deployment_ids: vec![],
@@ -751,6 +733,8 @@ impl PlanBuilder for PermanentDeleteBuilder {
             protected_reference_ids: vec![],
             source_step_order: 0,
             destination_step_order: None,
+            snapshot_id: Some(SnapshotId::generate()),
+            activity_id: ActivityId::generate(),
         };
         Ok(OperationPlanContent::new(
             intent.operation_id,
@@ -894,7 +878,13 @@ impl PlanBuilder for RestoreBuilder {
                 self.skill.id
             ))
             .map_err(|e| OperationError::InvalidPlan(e.to_string()))?,
-            provenance_paths: vec![],
+            provenance_paths: vec![
+                BundleRelativePath::parse(&format!(
+                    ".manager/manifests/skills/{}.json",
+                    self.skill.id
+                ))
+                .map_err(|e| OperationError::InvalidPlan(e.to_string()))?,
+            ],
             working_digest: self.manifest.working_digest,
             baseline_digest: self.manifest.baseline_digest,
             active_deployment_ids: vec![],
@@ -909,6 +899,8 @@ impl PlanBuilder for RestoreBuilder {
             protected_reference_ids: self.manifest.protected_references.clone(),
             source_step_order: 0,
             destination_step_order: Some(1),
+            snapshot_id: Some(SnapshotId::generate()),
+            activity_id: ActivityId::generate(),
         };
         Ok(OperationPlanContent::new(
             intent.operation_id,
@@ -953,6 +945,30 @@ fn entry_view(
         retention_deadline: Some(at.to_string()),
         retention_policy: "retain_30_days".into(),
         protected_references: refs.to_vec(),
+    }
+}
+
+fn reviewed_entry_view(
+    skill: &SkillRecord,
+    id: TrashEntryId,
+    created_at: UtcTimestamp,
+    context: &TrashPlanContext,
+) -> TrashEntryView {
+    TrashEntryView {
+        entry_id: id.to_string(),
+        skill_id: skill.id.to_string(),
+        display_name: skill.display_name.clone(),
+        original_working_path: skill.working_path.to_string(),
+        trashed_at: created_at.to_string(),
+        retention_deadline: context
+            .retention_deadline
+            .map(|deadline| deadline.to_string()),
+        retention_policy: match context.retention_policy {
+            TrashRetentionPolicy::Days30 => "retain_30_days",
+            TrashRetentionPolicy::Never => "never",
+        }
+        .into(),
+        protected_references: context.protected_reference_ids.clone(),
     }
 }
 
@@ -1045,10 +1061,16 @@ impl PlanBuilder for TrashBuilder {
                 false,
             ),
         ];
-        let deadline = self
-            .now
-            .checked_add(DurationMillis(30 * 24 * 60 * 60 * 1000))
-            .map_err(|e| OperationError::InvalidPlan(e.to_string()))?;
+        let policy = self.vault.manifest.trash_policy;
+        let deadline = if policy.never() {
+            None
+        } else {
+            Some(
+                self.now
+                    .checked_add(DurationMillis(30 * 24 * 60 * 60 * 1000))
+                    .map_err(|e| OperationError::InvalidPlan(e.to_string()))?,
+            )
+        };
         let context = TrashPlanContext {
             action: TrashAction::MoveToTrash,
             skill_id: self.skill.id,
@@ -1064,17 +1086,29 @@ impl PlanBuilder for TrashBuilder {
                 self.skill.id
             ))
             .map_err(|e| OperationError::InvalidPlan(e.to_string()))?,
-            provenance_paths: vec![],
+            provenance_paths: vec![
+                BundleRelativePath::parse(&format!(
+                    ".manager/manifests/skills/{}.json",
+                    self.skill.id
+                ))
+                .map_err(|e| OperationError::InvalidPlan(e.to_string()))?,
+            ],
             working_digest: self.skill.working_digest,
             baseline_digest: self.skill.baseline_digest,
             active_deployment_ids: vec![],
             deployments_resolved: true,
-            retention_policy: TrashRetentionPolicy::Days30,
-            retention_deadline: Some(deadline),
+            retention_policy: if policy.never() {
+                TrashRetentionPolicy::Never
+            } else {
+                TrashRetentionPolicy::Days30
+            },
+            retention_deadline: deadline,
             confirmation_subject: self.skill.display_name.clone(),
             protected_reference_ids: vec![format!("object:{}", self.skill.working_digest)],
             source_step_order: 0,
             destination_step_order: Some(1),
+            snapshot_id: Some(SnapshotId::generate()),
+            activity_id: ActivityId::generate(),
         };
         Ok(OperationPlanContent::new(
             intent.operation_id,
@@ -1110,6 +1144,84 @@ struct TrashHooks {
 #[allow(clippy::needless_pass_by_value)]
 fn hook(e: impl ToString) -> OperationHookError {
     OperationHookError::new(e.to_string())
+}
+impl OperationPreflight for TrashHooks {
+    fn preflight(&self, plan: &OperationPlan) -> Result<(), OperationHookError> {
+        let c = plan
+            .content
+            .trash
+            .as_ref()
+            .ok_or_else(|| hook("missing Trash context"))?;
+        let skill = self
+            .vault
+            .repositories
+            .skill(c.skill_id)
+            .map_err(hook)?
+            .ok_or_else(|| hook("Skill no longer exists"))?;
+        if skill.lifecycle != c.lifecycle_before
+            || skill.working_digest != c.working_digest
+            || skill.baseline_digest != c.baseline_digest
+        {
+            return Err(hook("Skill lifecycle or digest changed after review"));
+        }
+        if c.action == TrashAction::MoveToTrash
+            && self
+                .vault
+                .repositories
+                .skill_deployments(c.skill_id)
+                .map_err(hook)?
+                .iter()
+                .any(|deployment| deployment.active)
+        {
+            return Err(hook("an active deployment appeared after review"));
+        }
+        if c.action != TrashAction::MoveToTrash {
+            let manifest = read_trash_entry(
+                &self
+                    .vault
+                    .paths
+                    .trash_entry_manifest(c.skill_id, c.trash_entry_id),
+            )
+            .map_err(hook)?;
+            validate_entry(
+                &skill,
+                c.trash_entry_id,
+                &self.vault.paths.trash_entry(c.skill_id, c.trash_entry_id),
+                &manifest,
+            )
+            .map_err(hook)?;
+        }
+        if c.action == TrashAction::PermanentlyDelete {
+            let blockers = self
+                .vault
+                .repositories
+                .permanent_delete_blockers(c.skill_id, c.working_digest)
+                .map_err(hook)?;
+            if blockers
+                .iter()
+                .any(|blocker| !blocker.ends_with(&plan.content.operation_id.to_string()))
+            {
+                return Err(hook(
+                    "protected or unresolved evidence appeared after review",
+                ));
+            }
+            for id in self.store_nonterminal()? {
+                if id != plan.content.operation_id {
+                    return Err(hook("an unresolved operation appeared after review"));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl TrashHooks {
+    fn store_nonterminal(&self) -> Result<Vec<OperationId>, OperationHookError> {
+        OperationStore::open(self.vault.paths.manager())
+            .map_err(hook)?
+            .nonterminal_operation_ids()
+            .map_err(hook)
+    }
 }
 impl StagingProvider for TrashHooks {
     fn stage(
@@ -1153,6 +1265,34 @@ impl StagingProvider for TrashHooks {
             .map_err(hook)?;
         if copied.digest != c.working_digest {
             return Err(hook("staged Trash digest mismatch"));
+        }
+        if c.action == TrashAction::MoveToTrash {
+            let skill_manifest = self.vault.manifests.read_skill(c.skill_id).map_err(hook)?;
+            let retention_policy = if c.retention_policy == TrashRetentionPolicy::Never {
+                self.vault.manifest.trash_policy
+            } else {
+                TrashPolicy::Retain30Days
+            };
+            write_trash_entry(
+                &staging.join("manifest.json"),
+                &TrashEntryManifest {
+                    schema_version: 1,
+                    entry_id: c.trash_entry_id,
+                    skill_id: c.skill_id,
+                    original_working_path: skill_manifest.working_path.clone(),
+                    source_provenance: skill_manifest.sources.clone(),
+                    skill_manifest,
+                    working_digest: c.working_digest,
+                    baseline_digest: c.baseline_digest,
+                    trashed_at: plan.content.created_at,
+                    retention_policy,
+                    retention_deadline: c.retention_deadline,
+                    protected_references: c.protected_reference_ids.clone(),
+                },
+            )
+            .map_err(hook)?;
+        } else if c.action == TrashAction::Restore {
+            fs::copy(source.join("manifest.json"), staging.join("manifest.json")).map_err(hook)?;
         }
         Ok(())
     }
@@ -1231,13 +1371,10 @@ impl OperationFinalizer for TrashHooks {
             .as_ref()
             .ok_or_else(|| hook("missing Trash context"))?;
         if c.action == TrashAction::PermanentlyDelete {
-            let path = self
-                .vault
-                .paths
-                .trash_entry_manifest(c.skill_id, c.trash_entry_id);
-            if path.exists() {
-                fs::remove_file(path).map_err(hook)?;
-            }
+            self.vault
+                .manifests
+                .remove_skill(c.skill_id)
+                .map_err(hook)?;
             return Ok(());
         }
         if c.action == TrashAction::Restore {
@@ -1255,7 +1392,27 @@ impl OperationFinalizer for TrashHooks {
             {
                 return Err(hook("restored working digest mismatch"));
             }
-            let mut skill_manifest = self.vault.manifests.read_skill(c.skill_id).map_err(hook)?;
+            let staged_manifest = destination.join("manifest.json");
+            if !staged_manifest.is_file() {
+                let published = self.vault.manifests.read_skill(c.skill_id).map_err(hook)?;
+                let expected_path = BundleRelativePath::parse(&format!(
+                    "{}/{}",
+                    c.destination_relative_path.as_ref().expect("destination"),
+                    c.deployment_name.as_str()
+                ))
+                .map_err(hook)?;
+                if published.skill_id != c.skill_id
+                    || published.working_digest != c.working_digest
+                    || published.baseline_digest != c.baseline_digest
+                    || published.deployment_name != c.deployment_name
+                    || published.working_path != expected_path
+                {
+                    return Err(hook("published Restore Skill manifest evidence mismatch"));
+                }
+                return Ok(());
+            }
+            let trash_manifest = read_trash_entry(&staged_manifest).map_err(hook)?;
+            let mut skill_manifest = trash_manifest.skill_manifest;
             if skill_manifest.skill_id != c.skill_id
                 || skill_manifest.working_digest != c.working_digest
                 || skill_manifest.baseline_digest != c.baseline_digest
@@ -1275,6 +1432,8 @@ impl OperationFinalizer for TrashHooks {
             if self.vault.manifests.read_skill(c.skill_id).map_err(hook)? != skill_manifest {
                 return Err(hook("restored Skill manifest verification mismatch"));
             }
+            fs::remove_file(staged_manifest).map_err(hook)?;
+            crate::filesystem::durable::sync_directory(&destination).map_err(hook)?;
             return Ok(());
         }
         let entry = self.vault.paths.root().join(
@@ -1291,30 +1450,18 @@ impl OperationFinalizer for TrashHooks {
         {
             return Err(hook("Trash working digest mismatch"));
         }
-        let skill_manifest = self.vault.manifests.read_skill(c.skill_id).map_err(hook)?;
-        let manifest = TrashEntryManifest {
-            schema_version: 1,
-            entry_id: c.trash_entry_id,
-            skill_id: c.skill_id,
-            original_working_path: skill_manifest.working_path.clone(),
-            source_provenance: skill_manifest.sources.clone(),
-            skill_manifest,
-            working_digest: c.working_digest,
-            baseline_digest: c.baseline_digest,
-            trashed_at: plan.content.created_at,
-            retention_policy: TrashPolicy::Retain30Days,
-            retention_deadline: c.retention_deadline,
-            protected_references: c.protected_reference_ids.clone(),
-        };
         let manifest_path = self
             .vault
             .paths
             .trash_entry_manifest(c.skill_id, c.trash_entry_id);
-        write_trash_entry(&manifest_path, &manifest).map_err(hook)?;
         let checked = read_trash_entry(&manifest_path).map_err(hook)?;
-        if checked != manifest {
+        if checked.skill_id != c.skill_id || checked.working_digest != c.working_digest {
             return Err(hook("Trash manifest verification mismatch"));
         }
+        self.vault
+            .manifests
+            .remove_skill(c.skill_id)
+            .map_err(hook)?;
         Ok(())
     }
     fn finalize_projection(
@@ -1335,8 +1482,8 @@ impl OperationFinalizer for TrashHooks {
                     c.skill_id,
                     plan.content.operation_id,
                     plan.plan_digest.to_string(),
-                    SnapshotId::generate(),
-                    ActivityId::generate(),
+                    c.snapshot_id.expect("validated destructive snapshot ID"),
+                    c.activity_id,
                     journal.updated_at,
                     BundleRelativePath::parse(&format!(
                         ".manager/operations/{}",
@@ -1355,7 +1502,8 @@ impl OperationFinalizer for TrashHooks {
                     c.skill_id,
                     plan.content.operation_id,
                     plan.plan_digest.to_string(),
-                    ActivityId::generate(),
+                    c.snapshot_id.expect("validated destructive snapshot ID"),
+                    c.activity_id,
                     journal.updated_at,
                     BundleRelativePath::parse(&format!(
                         ".manager/operations/{}",
@@ -1378,8 +1526,8 @@ impl OperationFinalizer for TrashHooks {
                 c.skill_id,
                 plan.content.operation_id,
                 plan.plan_digest.to_string(),
-                SnapshotId::generate(),
-                ActivityId::generate(),
+                c.snapshot_id.expect("validated destructive snapshot ID"),
+                c.activity_id,
                 journal.updated_at,
                 BundleRelativePath::parse(&format!(
                     ".manager/operations/{}",
@@ -1598,11 +1746,144 @@ mod tests {
     }
 
     #[test]
+    fn deployment_appearing_after_plan_is_rejected_before_snapshot_or_staging() {
+        let fixture = fixture();
+        let plan = fixture
+            .service
+            .plan_move_to_trash(&TrashPlanRequest {
+                skill_id: fixture.skill_id.to_string(),
+            })
+            .unwrap();
+        let now = UtcTimestamp::now();
+        let target_id = TargetId::generate();
+        fixture
+            .vault
+            .repositories
+            .upsert_target(TargetRecord {
+                id: target_id,
+                adapter_id: "fixture@1".parse().unwrap(),
+                scope: "global".into(),
+                root_path: fixture.source.clone(),
+                canonical_root_path: fixture.source.clone(),
+                project_id: None,
+                is_override: false,
+                is_custom: true,
+                created_at: now,
+                updated_at: now,
+            })
+            .unwrap();
+        fixture
+            .vault
+            .repositories
+            .upsert_deployment(DeploymentRecord {
+                id: DeploymentId::generate(),
+                skill_id: fixture.skill_id,
+                target_id,
+                deployment_name: DeploymentName::parse("trash-fixture").unwrap(),
+                target_path: fixture.source.clone(),
+                mode: DeploymentMode::ManagedCopy,
+                expected_digest: fixture
+                    .vault
+                    .repositories
+                    .skill(fixture.skill_id)
+                    .unwrap()
+                    .unwrap()
+                    .working_digest,
+                expected_link_target: None,
+                health: DeploymentHealth::Clean,
+                adapter_version: "fixture@1".parse().unwrap(),
+                active: true,
+                last_verified_at: Some(now),
+                last_operation_id: None,
+                created_at: now,
+                updated_at: now,
+            })
+            .unwrap();
+        assert!(
+            fixture
+                .service
+                .execute_move_to_trash(&TrashExecuteRequest {
+                    operation_id: plan.operation_id,
+                    plan_digest: plan.plan_digest,
+                })
+                .is_err()
+        );
+        assert!(fixture.working_container.is_dir());
+        assert_eq!(
+            fixture
+                .vault
+                .database
+                .execute(|c| c
+                    .query_row("SELECT count(*) FROM snapshots", [], |row| row
+                        .get::<_, i64>(0))
+                    .map_err(crate::persistence::DbExecutorError::Sqlite))
+                .unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn trash_execute_endpoints_reject_a_plan_for_another_action() {
+        let fixture = fixture();
+        let plan = fixture
+            .service
+            .plan_move_to_trash(&TrashPlanRequest {
+                skill_id: fixture.skill_id.to_string(),
+            })
+            .unwrap();
+        let request = TrashExecuteRequest {
+            operation_id: plan.operation_id,
+            plan_digest: plan.plan_digest,
+        };
+        assert!(fixture.service.execute_restore(&request).is_err());
+        assert!(fixture.service.execute_permanent_delete(&request).is_err());
+        assert!(fixture.working_container.is_dir());
+    }
+
+    #[test]
+    fn schema_v5_rejects_noncanonical_trash_scope_and_restore_identity() {
+        let fixture = fixture();
+        let view = fixture
+            .service
+            .plan_move_to_trash(&TrashPlanRequest {
+                skill_id: fixture.skill_id.to_string(),
+            })
+            .unwrap();
+        let stored = fixture
+            .service
+            .store
+            .load(view.operation_id.parse().unwrap())
+            .unwrap();
+        for bad in [
+            ".manager",
+            ".manager/trash",
+            ".manager/trash/not-the-entry",
+            "skills/not-a-uuid",
+        ] {
+            let mut content = stored.plan.content.clone();
+            content.trash.as_mut().unwrap().destination_relative_path = Some(bad.parse().unwrap());
+            assert!(OperationPlan::build(content).is_err(), "accepted {bad}");
+        }
+        let mut content = stored.plan.content;
+        content.trash.as_mut().unwrap().skill_manifest_path =
+            ".manager/vault.json".parse().unwrap();
+        assert!(OperationPlan::build(content).is_err());
+    }
+
+    #[test]
     fn move_is_exact_stable_durable_and_replay_is_read_only() {
         let fixture = fixture();
         let expected = tree_bytes(&fixture.working_bundle);
         let (plan, first) = move_to_trash(&fixture);
         assert!(!first.replayed);
+        let trashed_at = UtcTimestamp::parse_rfc3339(&plan.entry.trashed_at).unwrap();
+        let deadline =
+            UtcTimestamp::parse_rfc3339(plan.entry.retention_deadline.as_deref().unwrap()).unwrap();
+        assert_eq!(
+            deadline.unix_millis().unwrap() - trashed_at.unix_millis().unwrap(),
+            30 * 24 * 60 * 60 * 1_000
+        );
+        assert_eq!(plan.entry.retention_policy, "retain_30_days");
         let entry = fixture.vault.paths.trash_entry(
             fixture.skill_id,
             TrashEntryId::from_str(&plan.entry.entry_id).unwrap(),
@@ -1663,10 +1944,26 @@ mod tests {
         fixture
             .service
             .execute_restore(&TrashExecuteRequest {
-                operation_id: restore.operation_id,
-                plan_digest: restore.plan_digest,
+                operation_id: restore.operation_id.clone(),
+                plan_digest: restore.plan_digest.clone(),
             })
             .unwrap();
+        let operation_id = OperationId::from_str(&restore.operation_id).unwrap();
+        let stored = fixture.service.store.load(operation_id).unwrap();
+        let hooks = TrashHooks {
+            vault: Arc::clone(&fixture.vault),
+        };
+        // Both finalization phases are independently replayable after their durable effects.
+        hooks
+            .publish_manifests(&stored.plan, &stored.journal)
+            .unwrap();
+        hooks
+            .finalize_projection(&stored.plan, &stored.journal)
+            .unwrap();
+        let counts = fixture.vault.database.execute(move |c| c.query_row(
+            "SELECT (SELECT count(*) FROM operations WHERE id=?1), (SELECT count(*) FROM activity WHERE operation_id=?1), (SELECT count(*) FROM snapshots WHERE operation_id=?1), (SELECT count(*) FROM snapshot_items i JOIN snapshots s ON s.id=i.snapshot_id WHERE s.operation_id=?1)",
+            [operation_id.to_string()], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?, r.get::<_, i64>(3)?))).map_err(crate::persistence::DbExecutorError::Sqlite)).unwrap();
+        assert_eq!(counts, (1, 1, 1, 1));
         assert_eq!(
             fs::read(fixture.working_container.join("occupant.txt")).unwrap(),
             b"do not touch"
@@ -1823,6 +2120,55 @@ mod tests {
             now
         ));
         assert!(!automatic_cleanup_eligible(TrashPolicy::Never, None, now));
+
+        let fixture = fixture();
+        let context = TrashPlanContext {
+            action: TrashAction::MoveToTrash,
+            skill_id: fixture.skill_id,
+            display_name: "Trash Fixture".into(),
+            deployment_name: DeploymentName::parse("trash-fixture").unwrap(),
+            lifecycle_before: SkillLifecycle::Active,
+            lifecycle_after: SkillLifecycle::Trashed,
+            trash_entry_id: TrashEntryId::generate(),
+            source_relative_path: "skills/source".parse().unwrap(),
+            destination_relative_path: Some(".manager/trash/entry".parse().unwrap()),
+            skill_manifest_path: ".manager/manifests/skills/skill.json".parse().unwrap(),
+            provenance_paths: vec![],
+            working_digest: fixture
+                .vault
+                .repositories
+                .skill(fixture.skill_id)
+                .unwrap()
+                .unwrap()
+                .working_digest,
+            baseline_digest: fixture
+                .vault
+                .repositories
+                .skill(fixture.skill_id)
+                .unwrap()
+                .unwrap()
+                .baseline_digest,
+            active_deployment_ids: vec![],
+            deployments_resolved: true,
+            retention_policy: TrashRetentionPolicy::Never,
+            retention_deadline: None,
+            confirmation_subject: "Trash Fixture".into(),
+            protected_reference_ids: vec!["object:sealed".into()],
+            source_step_order: 0,
+            destination_step_order: Some(1),
+            snapshot_id: Some(SnapshotId::generate()),
+            activity_id: ActivityId::generate(),
+        };
+        let skill = fixture
+            .vault
+            .repositories
+            .skill(fixture.skill_id)
+            .unwrap()
+            .unwrap();
+        let view = reviewed_entry_view(&skill, context.trash_entry_id, now, &context);
+        assert_eq!(view.retention_policy, "never");
+        assert_eq!(view.retention_deadline, None);
+        assert_eq!(view.protected_references, vec!["object:sealed"]);
     }
 
     #[test]

@@ -546,6 +546,8 @@ pub struct TrashPlanContext {
     pub protected_reference_ids: Vec<String>,
     pub source_step_order: u32,
     pub destination_step_order: Option<u32>,
+    pub snapshot_id: Option<SnapshotId>,
+    pub activity_id: ActivityId,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -922,6 +924,7 @@ pub enum PlanBuildError {
     InvalidTrashContext,
 }
 
+#[allow(clippy::too_many_lines)]
 fn validate_trash(
     plan: &OperationPlanContent,
     context: &TrashPlanContext,
@@ -932,6 +935,18 @@ fn validate_trash(
         TrashAction::Restore => OperationKind::Restore,
         TrashAction::PermanentlyDelete => OperationKind::PermanentlyDelete,
     };
+    let skill_path = BundleRelativePath::parse(&format!("skills/{}", context.skill_id))
+        .map_err(|_| PlanBuildError::InvalidTrashContext)?;
+    let trash_path =
+        BundleRelativePath::parse(&format!(".manager/trash/{}", context.trash_entry_id))
+            .map_err(|_| PlanBuildError::InvalidTrashContext)?;
+    let manifest_path = BundleRelativePath::parse(&format!(
+        ".manager/manifests/skills/{}.json",
+        context.skill_id
+    ))
+    .map_err(|_| PlanBuildError::InvalidTrashContext)?;
+    let authority =
+        AdapterId::from_str("skills-hub@1").map_err(|_| PlanBuildError::InvalidTrashContext)?;
     let lifecycle_ok = matches!(
         (
             context.action,
@@ -956,18 +971,57 @@ fn validate_trash(
     let destination = context
         .destination_step_order
         .and_then(|order| plan.steps.get(order as usize));
+    let source_expected = match context.action {
+        TrashAction::MoveToTrash => &skill_path,
+        TrashAction::Restore | TrashAction::PermanentlyDelete => &trash_path,
+    };
     let paths_ok = source.is_some_and(|step| {
         step.order == context.source_step_order
-            && step.path.relative() == &context.source_relative_path
+            && step.order == 0
+            && step.path.relative() == source_expected
+            && &context.source_relative_path == source_expected
             && step.action == PlanAction::Remove
+            && step.before.expected_kind == EntryKind::Directory
+            && step.before.managed_skill_id == Some(context.skill_id)
+            && step.before.bundle_digest == Some(context.working_digest)
+            && step.before.adapter_id == authority
+            && step.after.expected_kind == EntryKind::Absent
     }) && match context.action {
         TrashAction::PermanentlyDelete => {
             context.destination_relative_path.is_none() && context.destination_step_order.is_none()
         }
         _ => destination.is_some_and(|step| {
             Some(step.path.relative()) == context.destination_relative_path.as_ref()
+                && step.order == 1
                 && step.action == PlanAction::Create
+                && step.before.expected_kind == EntryKind::Absent
+                && step.after.expected_kind == EntryKind::Directory
+                && step.after.managed_skill_id == Some(context.skill_id)
+                && step.after.bundle_digest == Some(context.working_digest)
+                && step.after.adapter_id == authority
         }),
+    };
+    let action_paths_ok = match context.action {
+        TrashAction::MoveToTrash => context.destination_relative_path.as_ref() == Some(&trash_path),
+        TrashAction::Restore => context
+            .destination_relative_path
+            .as_ref()
+            .is_some_and(|path| {
+                let mut parts = path.as_str().split('/');
+                parts.next() == Some("skills")
+                    && parts
+                        .next()
+                        .and_then(|id| SkillId::from_str(id).ok())
+                        .is_some()
+                    && parts.next().is_none()
+            }),
+        TrashAction::PermanentlyDelete => true,
+    };
+    let expected_source_subpath = match context.action {
+        TrashAction::MoveToTrash => context.deployment_name.as_str().to_owned(),
+        TrashAction::Restore | TrashAction::PermanentlyDelete => {
+            format!("working/{}", context.deployment_name)
+        }
     };
     let expected_steps = if context.action == TrashAction::PermanentlyDelete {
         1
@@ -986,15 +1040,25 @@ fn validate_trash(
         || plan.steps.len() != expected_steps
         || !lifecycle_ok
         || !paths_ok
+        || !action_paths_ok
         || !retention_ok
         || context.display_name.trim().is_empty()
         || context.confirmation_subject != context.display_name
         || !context.active_deployment_ids.is_empty()
         || !context.deployments_resolved
-        || context
-            .provenance_paths
-            .iter()
-            .any(|path| path == &context.skill_manifest_path)
+        || context.skill_manifest_path != manifest_path
+        || context.provenance_paths != [manifest_path]
+        || source
+            .and_then(|step| step.before.bundle_subpath.as_ref())
+            .map(BundleRelativePath::as_str)
+            != Some(expected_source_subpath.as_str())
+        || !matches!(
+            (context.action, context.snapshot_id),
+            (
+                TrashAction::MoveToTrash | TrashAction::Restore | TrashAction::PermanentlyDelete,
+                Some(_)
+            )
+        )
         || context.protected_reference_ids.iter().any(String::is_empty)
     {
         return invalid();

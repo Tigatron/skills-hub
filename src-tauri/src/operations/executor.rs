@@ -182,6 +182,19 @@ pub trait SnapshotRegistrar: Send + Sync {
     ) -> Result<SnapshotRegistration, OperationHookError>;
 }
 
+/// Revalidates domain-owned invariants while holding the Vault mutation coordinator.
+pub trait OperationPreflight: Send + Sync {
+    /// # Errors
+    /// Returns an error when domain state no longer matches the reviewed plan.
+    fn preflight(&self, _plan: &OperationPlan) -> Result<(), OperationHookError> {
+        Ok(())
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct NoopOperationPreflight;
+impl OperationPreflight for NoopOperationPreflight {}
+
 /// Builds one operation-specific staged result at a kernel-authorized sibling path.
 pub trait StagingProvider: Send + Sync {
     /// The provider must create `staging_path` exclusively, durably build the requested result,
@@ -326,6 +339,7 @@ pub struct OperationExecutor {
     stager: Arc<dyn StagingProvider>,
     snapshots: Arc<dyn SnapshotRegistrar>,
     finalizer: Arc<dyn OperationFinalizer>,
+    domain_preflight: Arc<dyn OperationPreflight>,
     events: Arc<dyn OperationEventSink>,
     failpoints: Arc<dyn OperationFailpoints>,
 }
@@ -347,9 +361,16 @@ impl OperationExecutor {
             stager,
             snapshots,
             finalizer,
+            domain_preflight: Arc::new(NoopOperationPreflight),
             events: Arc::new(NoopOperationEventSink),
             failpoints: Arc::new(NoopOperationFailpoints),
         }
+    }
+
+    #[must_use]
+    pub fn with_preflight(mut self, preflight: Arc<dyn OperationPreflight>) -> Self {
+        self.domain_preflight = preflight;
+        self
     }
 
     #[must_use]
@@ -390,6 +411,18 @@ impl OperationExecutor {
         }
         if stored.journal.state != OperationState::Planned {
             return Err(OperationError::RecoveryPending(stored.journal.state));
+        }
+
+        let domain_result = self
+            .domain_preflight
+            .preflight(&stored.plan)
+            .map_err(|error| OperationError::StalePlan {
+                step: None,
+                detail: error.to_string(),
+            });
+        if let Err(error) = domain_result {
+            self.finish_no_writes(&mut stored, &error, None, OperationOutcome::FailedNoWrites)?;
+            return Err(error);
         }
 
         if let Err(error) = self.preflight(&stored, cancellation) {
@@ -1743,7 +1776,18 @@ fn capture_expected_bundle_digest(
                     context: "reading fingerprint container",
                     source,
                 })?;
-            if children.len() != 1 || children[0].file_name() != Path::new(component).as_os_str() {
+            let expected_child = children
+                .iter()
+                .filter(|child| child.file_name() == Path::new(component).as_os_str())
+                .count()
+                == 1;
+            let allowed_manifest_sibling = current == path
+                && children.iter().all(|child| {
+                    child.file_name() == Path::new(component).as_os_str()
+                        || (child.file_name() == "manifest.json"
+                            && child.file_type().is_ok_and(|kind| kind.is_file()))
+                });
+            if !expected_child || (children.len() != 1 && !allowed_manifest_sibling) {
                 return Err(OperationError::FingerprintFailed(
                     "fingerprint container does not contain exactly the sealed subpath".to_owned(),
                 ));
