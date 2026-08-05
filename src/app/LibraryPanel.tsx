@@ -30,6 +30,7 @@ export function LibraryPanel() {
   const [targetId, setTargetId] = useState('');
   const [mode, setMode] = useState<DeploymentModeDto | ''>('');
   const [manualSkillId, setManualSkillId] = useState('');
+  const [deleteConfirmation, setDeleteConfirmation] = useState('');
 
   const library = useQuery({
     queryKey: queryKeys.library({ search, filter, offset: 0 }),
@@ -54,6 +55,11 @@ export function LibraryPanel() {
     queryFn: () => api.skillGet({ skillId: vaultedSkillId! }),
     enabled: Boolean(vaultedSkillId),
   });
+  const trashEntries = useQuery({
+    queryKey: ['trash-entries'],
+    queryFn: () => api.trashEntriesList(),
+  });
+  const trashEntry = trashEntries.data?.find((entry) => entry.skillId === vaultedSkillId) ?? null;
 
   const targets = useQuery({
     queryKey: queryKeys.targets,
@@ -139,18 +145,45 @@ export function LibraryPanel() {
       if (!plan) {
         throw new Error('No plan to execute.');
       }
+      if (plan.kind === 'trash') {
+        return api.trashExecute(plan.action, {
+          operationId: plan.plan.operationId,
+          planDigest: plan.plan.planDigest,
+        });
+      }
       return api.operationExecute({
         operationId: plan.plan.operationId,
         planDigest: plan.plan.planDigest,
       });
     },
     onSuccess: async (view) => {
+      if (!('kind' in view)) {
+        setOperation(null);
+        setPlan(null);
+        await queryClient.invalidateQueries({ queryKey: ['trash-entries'] });
+        await invalidateAfterOperation(queryClient);
+        return;
+      }
       setOperation(view);
       const skillId = operationSkillId(view);
       if (skillId) {
         setManualSkillId(skillId);
       }
       await invalidateAfterOperation(queryClient);
+    },
+  });
+
+  const planTrash = useMutation({
+    mutationFn: async (action: 'move_to_trash' | 'restore' | 'permanently_delete') => {
+      if (!skill.data) throw new Error('Load a managed Skill first.');
+      if (action === 'move_to_trash') return api.trashMovePlan(skill.data.skillId);
+      if (!trashEntry) throw new Error('The Trash entry is unavailable. Refresh and try again.');
+      if (action === 'restore') return api.trashRestorePlan(trashEntry.entryId);
+      return api.trashPermanentDeletePlan(trashEntry.entryId, deleteConfirmation);
+    },
+    onSuccess: (reviewed, action) => {
+      setPlan({ kind: 'trash', action, plan: reviewed });
+      setOperation(null);
     },
   });
 
@@ -168,6 +201,7 @@ export function LibraryPanel() {
     startScan.isPending ||
     planTakeover.isPending ||
     planDeploy.isPending ||
+    planTrash.isPending ||
     execute.isPending ||
     cancel.isPending;
 
@@ -307,7 +341,15 @@ export function LibraryPanel() {
             />
           )}
 
-          {skill.data ? <SkillSummary detail={skill.data} /> : null}
+          {skill.data ? (
+            <SkillSummary
+              detail={skill.data}
+              busy={busy}
+              confirmation={deleteConfirmation}
+              onConfirmationChange={setDeleteConfirmation}
+              onPlan={(action) => planTrash.mutate(action)}
+            />
+          ) : null}
 
           <div className={styles.stack}>
             <div className={styles.inlineFields}>
@@ -359,6 +401,7 @@ export function LibraryPanel() {
 
           {planTakeover.isError ? <ErrorBanner error={planTakeover.error} /> : null}
           {planDeploy.isError ? <ErrorBanner error={planDeploy.error} /> : null}
+          {planTrash.isError ? <ErrorBanner error={planTrash.error} /> : null}
           {execute.isError ? <ErrorBanner error={execute.error} /> : null}
 
           <OperationPanel
@@ -378,7 +421,19 @@ export function LibraryPanel() {
   );
 }
 
-function SkillSummary({ detail }: { detail: SkillDetail }) {
+export function SkillSummary({
+  detail,
+  busy,
+  confirmation,
+  onConfirmationChange,
+  onPlan,
+}: {
+  detail: SkillDetail;
+  busy: boolean;
+  confirmation: string;
+  onConfirmationChange: (value: string) => void;
+  onPlan: (action: 'move_to_trash' | 'restore' | 'permanently_delete') => void;
+}) {
   return (
     <div className={styles.planBox}>
       <h3>Vaulted Skill</h3>
@@ -400,6 +455,40 @@ function SkillSummary({ detail }: { detail: SkillDetail }) {
           }
         />
       </dl>
+      <div className={styles.panelActions}>
+        {detail.allowedActions.includes('move_to_trash') ? (
+          <SecondaryButton onPress={() => onPlan('move_to_trash')} isDisabled={busy}>
+            Plan Move to Trash
+          </SecondaryButton>
+        ) : null}
+        {detail.allowedActions.includes('restore') ? (
+          <SecondaryButton onPress={() => onPlan('restore')} isDisabled={busy}>
+            Plan restore
+          </SecondaryButton>
+        ) : null}
+      </div>
+      {detail.allowedActions.includes('permanently_delete') ? (
+        <div className={styles.stack}>
+          <p className={styles.muted}>
+            Permanent deletion cannot be undone. Type <strong>{detail.displayName}</strong> exactly
+            to review the deletion plan.
+          </p>
+          <div className={styles.inlineFields}>
+            <input
+              className={styles.textInput}
+              value={confirmation}
+              onChange={(event) => onConfirmationChange(event.target.value)}
+              aria-label={`Type ${detail.displayName} to confirm permanent deletion`}
+            />
+            <SecondaryButton
+              onPress={() => onPlan('permanently_delete')}
+              isDisabled={busy || confirmation !== detail.displayName}
+            >
+              Plan permanent delete
+            </SecondaryButton>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

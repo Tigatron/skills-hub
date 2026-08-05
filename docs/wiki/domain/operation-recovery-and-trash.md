@@ -135,6 +135,12 @@ Trash is inside the Vault's `.manager/trash`, not Finder's system Trash.
 
 Default retention is 30 days, with configurable choices including never. The UI shows cleanup date and space. Unresolved Operations and protected Snapshots prevent deletion; disk pressure never causes silent early deletion. Settings may lengthen retention, and protected recovery checkpoints can outlive it.
 
+## M0-013 implementation evidence
+
+Schema v5 binds application-internal MoveToTrash, Restore, and PermanentlyDelete plans to one Skill, exact Vault-relative source/destination paths, lifecycle transition, stable Trash entry identity, content and baseline digests, retention evidence, confirmation subject, protected references, and destructive source-step protection. Trash entries use UUID containers directly beneath `.manager/trash` with separately durable entry manifests in that authorized root, allowing the generic fingerprint contract to attest the content container without broad cleanup scope. Finalization atomically projects lifecycle, Operation, Snapshot where destructive, and one Activity; content objects and all Operation/Activity histories survive permanent removal for reference-aware GC.
+
+Temporary-Vault acceptance tests cover deployed-Skill blocking without a plan, exact content/provenance transfer, stable identity and `Trashed` state, terminal replay, same-path and occupied-path restore, zero automatic deployment recreation, confirmation/protected-reference blockers, exact-entry permanent removal, and retention defaults/expiry/never. Trash-specific inverse planning is not available. User-facing undo remains the completed schema-v4 deployment inverse: supported unchanged postconditions produce a reviewed new Operation, while unsupported or drifted operations return honest unavailable/conflict recovery choices.
+
 # Activity
 
 Activity is a user-facing append-only SQLite projection of durable facts, not the crash-recovery journal itself. The per-Operation filesystem journal remains the recovery source if SQLite finalization is interrupted; startup reconciliation can finish or rebuild the Activity projection from that evidence. Each entry includes:

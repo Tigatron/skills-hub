@@ -12,8 +12,8 @@ use thiserror::Error;
 use crate::{
     domain::{
         ActivityId, AdapterId, BundleDigest, BundleRelativePath, DeploymentHealth, DeploymentId,
-        DeploymentMode, DeploymentName, ObservationId, OperationId, ProjectId, SkillId, SnapshotId,
-        TargetId, UtcTimestamp,
+        DeploymentMode, DeploymentName, ObservationId, OperationId, ProjectId, SkillId,
+        SkillLifecycle, SnapshotId, TargetId, TrashEntryId, UtcTimestamp,
     },
     filesystem::{
         AuthorizedPath, BundleCaps, BundleStats, EntryKind, MetadataFingerprint, PathIdentity,
@@ -24,14 +24,17 @@ const PLAN_SCHEMA_VERSION_V1: u16 = 1;
 const PLAN_SCHEMA_VERSION_V2: u16 = 2;
 const PLAN_SCHEMA_VERSION_V3: u16 = 3;
 const PLAN_SCHEMA_VERSION_V4: u16 = 4;
+const PLAN_SCHEMA_VERSION_V5: u16 = 5;
 const PLAN_HASH_DOMAIN_V1: &[u8] = b"skills-hub-operation-plan\0v1\0";
 const PLAN_HASH_DOMAIN_V2: &[u8] = b"skills-hub-operation-plan\0v2\0";
 const PLAN_HASH_DOMAIN_V3: &[u8] = b"skills-hub-operation-plan\0v3\0";
 const PLAN_HASH_DOMAIN_V4: &[u8] = b"skills-hub-operation-plan\0v4\0";
+const PLAN_HASH_DOMAIN_V5: &[u8] = b"skills-hub-operation-plan\0v5\0";
 const PLAN_DIGEST_PREFIX_V1: &str = "sha256-operation-plan-v1:";
 const PLAN_DIGEST_PREFIX_V2: &str = "sha256-operation-plan-v2:";
 const PLAN_DIGEST_PREFIX_V3: &str = "sha256-operation-plan-v3:";
 const PLAN_DIGEST_PREFIX_V4: &str = "sha256-operation-plan-v4:";
+const PLAN_DIGEST_PREFIX_V5: &str = "sha256-operation-plan-v5:";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -47,17 +50,19 @@ impl OperationPlan {
     /// # Errors
     ///
     /// Returns [`PlanBuildError`] for an invalid schema, expiry, step list, or serialization.
+    #[allow(clippy::too_many_lines)]
     pub fn build(mut content: OperationPlanContent) -> Result<Self, PlanBuildError> {
-        let (takeover_context, deployment_context, batch_context) = match (
+        let (takeover_context, deployment_context, batch_context, trash_context) = match (
             content.schema_version,
             content.kind,
             content.takeover.as_ref(),
             content.deployment.as_ref(),
             content.batch_deployment.as_ref(),
+            content.trash.as_ref(),
         ) {
-            (PLAN_SCHEMA_VERSION_V1, _, None, None, None) => (None, None, None),
-            (PLAN_SCHEMA_VERSION_V2, OperationKind::TakeOver, Some(evidence), None, None) => {
-                (Some(evidence), None, None)
+            (PLAN_SCHEMA_VERSION_V1, _, None, None, None, None) => (None, None, None, None),
+            (PLAN_SCHEMA_VERSION_V2, OperationKind::TakeOver, Some(evidence), None, None, None) => {
+                (Some(evidence), None, None, None)
             }
             (
                 PLAN_SCHEMA_VERSION_V3,
@@ -65,22 +70,37 @@ impl OperationPlan {
                 None,
                 Some(evidence),
                 None,
-            ) => (None, Some(evidence), None),
+                None,
+            ) => (None, Some(evidence), None, None),
             (
                 PLAN_SCHEMA_VERSION_V4,
                 OperationKind::Deploy | OperationKind::Undo,
                 None,
                 None,
                 Some(evidence),
-            ) => (None, None, Some(evidence)),
-            (PLAN_SCHEMA_VERSION_V1 | PLAN_SCHEMA_VERSION_V2, _, _, _, _) => {
+                None,
+            ) => (None, None, Some(evidence), None),
+            (
+                PLAN_SCHEMA_VERSION_V5,
+                OperationKind::MoveToTrash
+                | OperationKind::Restore
+                | OperationKind::PermanentlyDelete,
+                None,
+                None,
+                None,
+                Some(evidence),
+            ) => (None, None, None, Some(evidence)),
+            (PLAN_SCHEMA_VERSION_V1 | PLAN_SCHEMA_VERSION_V2, _, _, _, _, _) => {
                 return Err(PlanBuildError::InvalidTakeoverContext);
             }
-            (PLAN_SCHEMA_VERSION_V3, _, _, _, _) => {
+            (PLAN_SCHEMA_VERSION_V3, _, _, _, _, _) => {
                 return Err(PlanBuildError::InvalidDeploymentContext);
             }
-            (PLAN_SCHEMA_VERSION_V4, _, _, _, _) => {
+            (PLAN_SCHEMA_VERSION_V4, _, _, _, _, _) => {
                 return Err(PlanBuildError::InvalidBatchContext);
+            }
+            (PLAN_SCHEMA_VERSION_V5, _, _, _, _, _) => {
+                return Err(PlanBuildError::InvalidTrashContext);
             }
             _ => return Err(PlanBuildError::UnsupportedSchema(content.schema_version)),
         };
@@ -101,6 +121,9 @@ impl OperationPlan {
         }
         if let Some(context) = batch_context {
             validate_batch_deployment(&content, context)?;
+        }
+        if let Some(context) = trash_context {
+            validate_trash(&content, context)?;
         }
         validate_steps(content.schema_version, &content.steps)?;
         if content.steps.iter().any(PlanStep::is_destructive)
@@ -134,6 +157,7 @@ impl OperationPlan {
             PLAN_SCHEMA_VERSION_V2 => PLAN_HASH_DOMAIN_V2,
             PLAN_SCHEMA_VERSION_V3 => PLAN_HASH_DOMAIN_V3,
             PLAN_SCHEMA_VERSION_V4 => PLAN_HASH_DOMAIN_V4,
+            PLAN_SCHEMA_VERSION_V5 => PLAN_HASH_DOMAIN_V5,
             _ => unreachable!("schema version was validated above"),
         });
         hasher.update(canonical);
@@ -194,6 +218,8 @@ pub struct OperationPlanContent {
     pub deployment: Option<DeploymentPlanContext>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub batch_deployment: Option<BatchDeploymentPlanContext>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trash: Option<TrashPlanContext>,
 }
 
 impl OperationPlanContent {
@@ -234,6 +260,7 @@ impl OperationPlanContent {
             takeover: None,
             deployment: None,
             batch_deployment: None,
+            trash: None,
         }
     }
 
@@ -255,6 +282,13 @@ impl OperationPlanContent {
     pub fn with_batch_deployment_context(mut self, context: BatchDeploymentPlanContext) -> Self {
         self.schema_version = PLAN_SCHEMA_VERSION_V4;
         self.batch_deployment = Some(context);
+        self
+    }
+
+    #[must_use]
+    pub fn with_trash_context(mut self, context: TrashPlanContext) -> Self {
+        self.schema_version = PLAN_SCHEMA_VERSION_V5;
+        self.trash = Some(context);
         self
     }
 }
@@ -470,6 +504,48 @@ pub struct BatchDeploymentPlanContext {
     pub activity_id: ActivityId,
     pub snapshot_id: Option<SnapshotId>,
     pub undo_of: Option<OperationId>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TrashAction {
+    MoveToTrash,
+    Restore,
+    PermanentlyDelete,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TrashRetentionPolicy {
+    Days30,
+    Never,
+}
+
+/// Exact domain and filesystem evidence reviewed for a Trash transition.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TrashPlanContext {
+    pub action: TrashAction,
+    pub skill_id: SkillId,
+    pub display_name: String,
+    pub deployment_name: DeploymentName,
+    pub lifecycle_before: SkillLifecycle,
+    pub lifecycle_after: SkillLifecycle,
+    pub trash_entry_id: TrashEntryId,
+    pub source_relative_path: BundleRelativePath,
+    pub destination_relative_path: Option<BundleRelativePath>,
+    pub skill_manifest_path: BundleRelativePath,
+    pub provenance_paths: Vec<BundleRelativePath>,
+    pub working_digest: BundleDigest,
+    pub baseline_digest: BundleDigest,
+    pub active_deployment_ids: Vec<DeploymentId>,
+    pub deployments_resolved: bool,
+    pub retention_policy: TrashRetentionPolicy,
+    pub retention_deadline: Option<UtcTimestamp>,
+    pub confirmation_subject: String,
+    pub protected_reference_ids: Vec<String>,
+    pub source_step_order: u32,
+    pub destination_step_order: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -728,6 +804,7 @@ impl fmt::Display for PlanDigest {
             PLAN_SCHEMA_VERSION_V2 => PLAN_DIGEST_PREFIX_V2,
             PLAN_SCHEMA_VERSION_V3 => PLAN_DIGEST_PREFIX_V3,
             PLAN_SCHEMA_VERSION_V4 => PLAN_DIGEST_PREFIX_V4,
+            PLAN_SCHEMA_VERSION_V5 => PLAN_DIGEST_PREFIX_V5,
             _ => return Err(fmt::Error),
         };
         write!(formatter, "{prefix}{}", hex::encode(self.bytes))
@@ -747,6 +824,8 @@ impl FromStr for PlanDigest {
                 (PLAN_SCHEMA_VERSION_V3, encoded)
             } else if let Some(encoded) = value.strip_prefix(PLAN_DIGEST_PREFIX_V4) {
                 (PLAN_SCHEMA_VERSION_V4, encoded)
+            } else if let Some(encoded) = value.strip_prefix(PLAN_DIGEST_PREFIX_V5) {
+                (PLAN_SCHEMA_VERSION_V5, encoded)
             } else {
                 return Err(PlanBuildError::InvalidDigest);
             };
@@ -839,6 +918,88 @@ pub enum PlanBuildError {
     InvalidDeploymentContext,
     #[error("Operation Plan batch deployment evidence is inconsistent")]
     InvalidBatchContext,
+    #[error("Operation Plan Trash evidence is inconsistent")]
+    InvalidTrashContext,
+}
+
+fn validate_trash(
+    plan: &OperationPlanContent,
+    context: &TrashPlanContext,
+) -> Result<(), PlanBuildError> {
+    let invalid = || Err(PlanBuildError::InvalidTrashContext);
+    let expected_kind = match context.action {
+        TrashAction::MoveToTrash => OperationKind::MoveToTrash,
+        TrashAction::Restore => OperationKind::Restore,
+        TrashAction::PermanentlyDelete => OperationKind::PermanentlyDelete,
+    };
+    let lifecycle_ok = matches!(
+        (
+            context.action,
+            context.lifecycle_before,
+            context.lifecycle_after
+        ),
+        (
+            TrashAction::MoveToTrash,
+            SkillLifecycle::Active,
+            SkillLifecycle::Trashed
+        ) | (
+            TrashAction::Restore,
+            SkillLifecycle::Trashed,
+            SkillLifecycle::Active
+        ) | (
+            TrashAction::PermanentlyDelete,
+            SkillLifecycle::Trashed,
+            SkillLifecycle::PermanentlyRemoved
+        )
+    );
+    let source = plan.steps.get(context.source_step_order as usize);
+    let destination = context
+        .destination_step_order
+        .and_then(|order| plan.steps.get(order as usize));
+    let paths_ok = source.is_some_and(|step| {
+        step.order == context.source_step_order
+            && step.path.relative() == &context.source_relative_path
+            && step.action == PlanAction::Remove
+    }) && match context.action {
+        TrashAction::PermanentlyDelete => {
+            context.destination_relative_path.is_none() && context.destination_step_order.is_none()
+        }
+        _ => destination.is_some_and(|step| {
+            Some(step.path.relative()) == context.destination_relative_path.as_ref()
+                && step.action == PlanAction::Create
+        }),
+    };
+    let expected_steps = if context.action == TrashAction::PermanentlyDelete {
+        1
+    } else {
+        2
+    };
+    let retention_ok = matches!(
+        (context.retention_policy, context.retention_deadline),
+        (TrashRetentionPolicy::Days30, Some(_)) | (TrashRetentionPolicy::Never, None)
+    );
+    if plan.kind != expected_kind
+        || plan.selected_skill_ids != [context.skill_id]
+        || !plan.selected_target_ids.is_empty()
+        || !plan.selected_deployment_ids.is_empty()
+        || !plan.ownership_choices.is_empty()
+        || plan.steps.len() != expected_steps
+        || !lifecycle_ok
+        || !paths_ok
+        || !retention_ok
+        || context.display_name.trim().is_empty()
+        || context.confirmation_subject != context.display_name
+        || !context.active_deployment_ids.is_empty()
+        || !context.deployments_resolved
+        || context
+            .provenance_paths
+            .iter()
+            .any(|path| path == &context.skill_manifest_path)
+        || context.protected_reference_ids.iter().any(String::is_empty)
+    {
+        return invalid();
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_lines)]
@@ -1518,6 +1679,7 @@ fn validate_batch_deployment(
             takeover: None,
             deployment: None,
             batch_deployment: None,
+            trash: None,
         };
         let mut single_deployment = entry.deployment.clone();
         single_deployment.step_order = 0;

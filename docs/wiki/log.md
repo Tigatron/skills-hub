@@ -2,6 +2,8 @@
 
 ## 2026-08-05
 
+* **Implementation**: Completed `M0-013` schema-v5 Trash lifecycle backend and temporary-Vault acceptance coverage. Move, restore, and permanent delete now execute through exact internal-Vault plans with stable Skill identity, provenance retention, protected operation Snapshots, durable Activity, occupied-path restore, exact confirmation/reference blockers, immutable-object/history retention, and terminal replay. Trash-specific undo remains unavailable; completed deployment inverse and drift conflict choices remain the honest user-facing undo contract.
+
 * **Acceptance**: Closed `M0-011` as `Complete (2026-08-05)` and checked it off in the M0 roadmap after the combined gate passed: 228 Rust tests passed with 3 intentional crash-helper ignores, strict Clippy passed with warnings denied, generated bindings matched Rust commands, and all OKF links/frontmatter validated.
 
 * **Implementation**: Completed `M0-010` with persisted Workspace Root authorization and filesystem identity; bounded hidden/ignore-aware read-only traversal; nested Git, implicit-adapter, and manual project discovery; nearest-project observation ownership; progressive safe project batches; complete-coverage-only absence; per-source diagnostics; and a live retrying `notify` invalidation/reconciliation driver for startup, resume/wake, overflow/disconnect, root replacement, and operation completion/rollback. Typed commands and generated bindings cover Workspace lifecycle and manual-project rescan.

@@ -1,8 +1,9 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { Button } from 'react-aria-components';
 
 import { api } from '../lib/api';
+import type { ReviewedPlan } from '../lib/api';
 import { queryKeys } from '../lib/query';
 import {
   EmptyState,
@@ -12,13 +13,20 @@ import {
   PanelHeader,
   PathText,
   StatusPill,
+  SecondaryButton,
 } from './components';
+import { OperationPanel } from './OperationPanel';
 import styles from './thin.module.css';
 
 export function ActivityPanel() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [kind, setKind] = useState('');
   const [outcome, setOutcome] = useState('');
+  const [undoPlan, setUndoPlan] = useState<ReviewedPlan | null>(null);
+  const [undoMessage, setUndoMessage] = useState<string | null>(null);
+  const [undoOperation, setUndoOperation] = useState<import('../bindings').AnyOperationView | null>(
+    null,
+  );
 
   const list = useQuery({
     queryKey: queryKeys.activity({
@@ -42,6 +50,34 @@ export function ActivityPanel() {
     queryKey: queryKeys.activityDetail(selectedId ?? 'none'),
     queryFn: () => api.activityDetail(selectedId!),
     enabled: Boolean(selectedId),
+  });
+
+  const planUndo = useMutation({
+    mutationFn: (operationId: string) => api.operationUndoPlan({ operationId }),
+    onSuccess: (result) => {
+      setUndoOperation(null);
+      if (result.status === 'available') {
+        setUndoPlan({ kind: 'batch', plan: result.plan });
+        setUndoMessage(null);
+      } else {
+        setUndoPlan(null);
+        setUndoMessage(
+          result.status === 'conflict'
+            ? `${result.detail} Choices: ${result.choices.join(', ')}.`
+            : `Undo unavailable: ${result.detail}`,
+        );
+      }
+    },
+  });
+  const executeUndo = useMutation({
+    mutationFn: () => {
+      if (!undoPlan) throw new Error('No undo plan is under review.');
+      return api.operationExecute({
+        operationId: undoPlan.plan.operationId,
+        planDigest: undoPlan.plan.planDigest,
+      });
+    },
+    onSuccess: setUndoOperation,
   });
 
   return (
@@ -179,7 +215,33 @@ export function ActivityPanel() {
                       <li key={reference}>Recovery: {reference}</li>
                     ))}
                   </ul>
+                  {detail.data.item.operationId ? (
+                    <SecondaryButton
+                      onPress={() => planUndo.mutate(detail.data.item.operationId!)}
+                      isDisabled={planUndo.isPending}
+                    >
+                      {planUndo.isPending ? 'Checking undo…' : 'Plan undo'}
+                    </SecondaryButton>
+                  ) : null}
                 </div>
+              ) : null}
+
+              {undoMessage ? <p className={styles.muted}>{undoMessage}</p> : null}
+              {planUndo.isError ? <ErrorBanner error={planUndo.error} /> : null}
+              {executeUndo.isError ? <ErrorBanner error={executeUndo.error} /> : null}
+              {undoPlan || undoOperation ? (
+                <OperationPanel
+                  plan={undoPlan}
+                  operation={undoOperation}
+                  busy={executeUndo.isPending}
+                  onExecute={() => executeUndo.mutate()}
+                  onCancel={() => undefined}
+                  onClear={() => {
+                    setUndoPlan(null);
+                    setUndoOperation(null);
+                    setUndoMessage(null);
+                  }}
+                />
               ) : null}
 
               {detail.data.scan ? (

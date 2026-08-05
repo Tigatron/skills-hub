@@ -38,6 +38,9 @@ import {
   type TakeoverPlanView,
   type TargetView,
   type TextPreview,
+  type TrashEntryView,
+  type TrashExecutionView,
+  type TrashPlanView,
   type UndeployPlanRequest,
   type VaultStatusView,
   type VaultSummary,
@@ -102,6 +105,22 @@ export const api = {
   activityList: (query: ActivityQuery): Promise<ActivityItem[]> =>
     unwrap(commands.activityList(query)),
   activityDetail: (id: string): Promise<ActivityDetail> => unwrap(commands.activityDetail(id)),
+  trashEntriesList: (): Promise<TrashEntryView[]> => unwrap(commands.trashEntriesList()),
+  trashMovePlan: (skillId: string): Promise<TrashPlanView> =>
+    unwrap(commands.trashMovePlan({ skillId })),
+  trashRestorePlan: (entryId: string): Promise<TrashPlanView> =>
+    unwrap(commands.trashRestorePlan({ entryId })),
+  trashPermanentDeletePlan: (entryId: string, confirmation: string): Promise<TrashPlanView> =>
+    unwrap(commands.trashPermanentDeletePlan({ entryId, confirmation })),
+  trashExecute: (
+    kind: 'move_to_trash' | 'restore' | 'permanently_delete',
+    request: { operationId: string; planDigest: string },
+  ): Promise<TrashExecutionView> => {
+    if (kind === 'move_to_trash') return unwrap(commands.trashMoveExecute(request));
+    if (kind === 'restore') return unwrap(commands.trashRestoreExecute(request));
+    return unwrap(commands.trashPermanentDeleteExecute(request));
+  },
+  operationUndoPlan: (request: OperationIdRequest) => unwrap(commands.operationUndoPlan(request)),
 };
 
 export type NavId = 'library' | 'deployments' | 'activity';
@@ -109,7 +128,12 @@ export type NavId = 'library' | 'deployments' | 'activity';
 export type ReviewedPlan =
   | { kind: 'takeover'; plan: TakeoverPlanView }
   | { kind: 'deployment'; plan: DeploymentPlanView }
-  | { kind: 'batch'; plan: BatchDeploymentPlanView };
+  | { kind: 'batch'; plan: BatchDeploymentPlanView }
+  | {
+      kind: 'trash';
+      action: 'move_to_trash' | 'restore' | 'permanently_delete';
+      plan: TrashPlanView;
+    };
 
 export function planIdentity(plan: ReviewedPlan): { operationId: string; planDigest: string } {
   return { operationId: plan.plan.operationId, planDigest: plan.plan.planDigest };

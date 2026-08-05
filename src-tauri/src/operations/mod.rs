@@ -26,7 +26,8 @@ pub use plan::{
     PlanAction, PlanBlocker, PlanBlockerCode, PlanBuildError, PlanDigest, PlanPath, PlanStep,
     RecoverySummary, TakeoverDecision, TakeoverObservationEvidence, TakeoverObservationStatus,
     TakeoverPlanContext, TakeoverReplacementEvidence, TakeoverSkillEvidence, TakeoverTargetScope,
-    TargetCapabilityEvidence, UndeployResolution,
+    TargetCapabilityEvidence, TrashAction, TrashPlanContext, TrashRetentionPolicy,
+    UndeployResolution,
 };
 pub use planner::{OperationIntent, OperationPlanner, PlanBuilder};
 pub use recovery::{StartupDecision, classify_startup};

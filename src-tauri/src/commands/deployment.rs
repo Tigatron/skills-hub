@@ -1,5 +1,7 @@
 //! Typed Target, deployment, health, and undeploy IPC use cases.
 
+use serde::Serialize;
+use specta::Type;
 use tauri::State;
 
 use crate::{
@@ -13,6 +15,21 @@ use crate::{
     error::AppErrorView,
     runtime::AppRuntime,
 };
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum OperationUndoPlanView {
+    Available {
+        plan: BatchDeploymentPlanView,
+    },
+    Conflict {
+        detail: String,
+        choices: Vec<String>,
+    },
+    Unavailable {
+        detail: String,
+    },
+}
 
 #[tauri::command]
 #[specta::specta]
@@ -38,6 +55,34 @@ pub async fn deployment_undo_plan(
         .run_blocking(move || service.plan_undo(&request.operation_id))
         .await?
         .map_err(Into::into)
+}
+
+/// General undo entry point. M0 can invert successful batch deployments. Trash transitions and
+/// other operation kinds are reported unavailable until they have exact inverse evidence.
+#[tauri::command]
+#[specta::specta]
+pub async fn operation_undo_plan(
+    runtime: State<'_, AppRuntime>,
+    request: crate::application::takeover::OperationIdRequest,
+) -> Result<OperationUndoPlanView, AppErrorView> {
+    let service = runtime.deployment_service()?;
+    runtime
+        .run_blocking(move || match service.plan_undo(&request.operation_id) {
+            Ok(plan) => Ok(OperationUndoPlanView::Available { plan }),
+            Err(crate::application::deployment::DeploymentError::DriftBlocked(detail))
+                if detail.contains("changed") =>
+            {
+                Ok(OperationUndoPlanView::Conflict {
+                    detail,
+                    choices: vec!["inspect".into(), "redeploy".into(), "restore".into()],
+                })
+            }
+            Err(crate::application::deployment::DeploymentError::DriftBlocked(detail)) => {
+                Ok(OperationUndoPlanView::Unavailable { detail })
+            }
+            Err(error) => Err(AppErrorView::from(error)),
+        })
+        .await?
 }
 
 #[tauri::command]

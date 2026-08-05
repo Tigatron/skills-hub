@@ -792,17 +792,23 @@ impl TakeoverService {
             .repositories
             .skill(id)?
             .ok_or(TakeoverError::SkillMissing)?;
-        let current = hash_bundle(
-            &self.vault.paths.root().join(skill.working_path.as_str()),
-            BundleCaps::default(),
-        )
-        .map_err(|e| TakeoverError::Journal(e.to_string()))?;
         let baseline = self
             .vault
             .objects
             .verify(skill.baseline_digest)
             .map_err(|e| TakeoverError::Journal(e.to_string()))?;
-        if current.digest != skill.working_digest || baseline.digest != skill.baseline_digest {
+        let current_matches = if skill.lifecycle == SkillLifecycle::Active {
+            hash_bundle(
+                &self.vault.paths.root().join(skill.working_path.as_str()),
+                BundleCaps::default(),
+            )
+            .map_err(|e| TakeoverError::Journal(e.to_string()))?
+            .digest
+                == skill.working_digest
+        } else {
+            true
+        };
+        if !current_matches || baseline.digest != skill.baseline_digest {
             return Err(TakeoverError::UnstablePreview);
         }
         let sources = self.vault.repositories.skill_sources(id)?;
@@ -824,10 +830,11 @@ impl TakeoverService {
                 )
             })
             .collect();
-        let mut actions = vec!["preview".into(), "move_to_trash".into()];
-        if active == 0 {
-            actions.push("add_and_manage".into());
-        }
+        let actions = match skill.lifecycle {
+            SkillLifecycle::Active => vec!["move_to_trash".into()],
+            SkillLifecycle::Trashed => vec!["restore".into(), "permanently_delete".into()],
+            SkillLifecycle::PermanentlyRemoved => Vec::new(),
+        };
         Ok(SkillDetail {
             skill_id: id.to_string(),
             display_name: skill.display_name,

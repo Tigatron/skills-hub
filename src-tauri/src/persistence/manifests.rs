@@ -11,7 +11,7 @@ use thiserror::Error;
 use crate::{
     domain::{
         AdapterId, BundleDigest, BundleRelativePath, DeploymentId, DeploymentMode, DeploymentName,
-        OperationId, SkillId, TargetId, UtcTimestamp, VaultId,
+        OperationId, SkillId, TargetId, TrashEntryId, UtcTimestamp, VaultId,
     },
     filesystem::durable::{atomic_write, preserve_corrupt_copy, sync_directory},
 };
@@ -20,6 +20,7 @@ pub const VAULT_SCHEMA_VERSION: u32 = 1;
 pub const SETTINGS_SCHEMA_VERSION: u32 = 1;
 pub const SKILL_MANIFEST_SCHEMA_VERSION: u32 = 1;
 pub const DEPLOYMENT_MANIFEST_SCHEMA_VERSION: u32 = 1;
+pub const TRASH_ENTRY_MANIFEST_SCHEMA_VERSION: u32 = 1;
 pub const DIGEST_VERSION: &str = "sha256-bundle-v1";
 
 pub(crate) trait VersionedManifest: Serialize + DeserializeOwned {
@@ -77,12 +78,62 @@ impl VersionedManifest for VaultManifest {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TrashPolicy {
+    Retain30Days,
+    Never,
+    /// Legacy spelling retained so existing v1 Vault manifests remain readable.
     RetainUntilExplicitDelete,
 }
 
 impl Default for TrashPolicy {
     fn default() -> Self {
-        Self::RetainUntilExplicitDelete
+        Self::Retain30Days
+    }
+}
+
+impl TrashPolicy {
+    #[must_use]
+    pub const fn never(self) -> bool {
+        matches!(self, Self::Never | Self::RetainUntilExplicitDelete)
+    }
+}
+
+/// Self-contained recovery evidence stored with a trashed Skill. Paths are Vault-relative so a
+/// Vault remains movable; the original UUID working container is preserved verbatim.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TrashEntryManifest {
+    pub schema_version: u32,
+    pub entry_id: TrashEntryId,
+    pub skill_id: SkillId,
+    pub original_working_path: BundleRelativePath,
+    pub skill_manifest: SkillManifest,
+    pub source_provenance: Vec<SkillManifestSource>,
+    pub working_digest: BundleDigest,
+    pub baseline_digest: BundleDigest,
+    pub trashed_at: UtcTimestamp,
+    pub retention_policy: TrashPolicy,
+    pub retention_deadline: Option<UtcTimestamp>,
+    pub protected_references: Vec<String>,
+}
+
+impl VersionedManifest for TrashEntryManifest {
+    const SCHEMA_VERSION: u32 = TRASH_ENTRY_MANIFEST_SCHEMA_VERSION;
+
+    fn validate(&self) -> Result<(), String> {
+        if self.schema_version != Self::SCHEMA_VERSION
+            || self.skill_id != self.skill_manifest.skill_id
+            || self.original_working_path != self.skill_manifest.working_path
+            || self.working_digest != self.skill_manifest.working_digest
+            || self.baseline_digest != self.skill_manifest.baseline_digest
+            || self.source_provenance != self.skill_manifest.sources
+            || self.protected_references.iter().any(String::is_empty)
+        {
+            return Err("Trash entry identity or recovery evidence is inconsistent".to_owned());
+        }
+        match (self.retention_policy.never(), self.retention_deadline) {
+            (true, None) | (false, Some(_)) => Ok(()),
+            _ => Err("Trash retention deadline is inconsistent with its policy".to_owned()),
+        }
     }
 }
 
@@ -199,9 +250,16 @@ impl VersionedManifest for SkillManifest {
         if self.display_name.trim().is_empty() || self.display_name.chars().any(char::is_control) {
             return Err("Skill displayName is empty or contains control characters".to_owned());
         }
-        let expected = format!("skills/{}/{}", self.skill_id, self.deployment_name.as_str());
-        if self.working_path.as_str() != expected {
-            return Err("Skill workingPath does not match its stable identity and name".to_owned());
+        let parts: Vec<_> = self.working_path.as_str().split('/').collect();
+        if parts.len() != 3
+            || parts[0] != "skills"
+            || parts[2] != self.deployment_name.as_str()
+            || parts[1].parse::<SkillId>().is_err()
+        {
+            return Err(
+                "Skill workingPath does not use a UUID container and its deployment name"
+                    .to_owned(),
+            );
         }
         for source in &self.sources {
             source.validate()?;
@@ -357,6 +415,39 @@ impl ManifestStore {
             Err(error) => Err(ManifestError::Io(error)),
         }
     }
+
+    /// Durably removes one Skill manifest. Repeating removal is a no-op.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the exact manifest cannot be removed or its parent cannot be synced.
+    pub fn remove_skill(&self, id: SkillId) -> Result<(), ManifestError> {
+        let path = self.skill_path(id);
+        match fs::remove_file(path) {
+            Ok(()) => sync_directory(&self.skills)
+                .map_err(|error| ManifestError::Durability(error.to_string())),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(ManifestError::Io(error)),
+        }
+    }
+}
+
+/// Reads and validates a Trash entry manifest at an executor-authorized path.
+///
+/// # Errors
+///
+/// Returns an error when the manifest is unavailable, malformed, unsupported, or inconsistent.
+pub fn read_trash_entry(path: &Path) -> Result<TrashEntryManifest, ManifestError> {
+    read_versioned(path)
+}
+
+/// Atomically writes a validated Trash entry manifest at an executor-authorized path.
+///
+/// # Errors
+///
+/// Returns an error when validation, serialization, or durable writing fails.
+pub fn write_trash_entry(path: &Path, manifest: &TrashEntryManifest) -> Result<(), ManifestError> {
+    write_versioned(path, manifest)
 }
 
 pub(crate) fn read_versioned<T: VersionedManifest>(path: &Path) -> Result<T, ManifestError> {

@@ -7,7 +7,8 @@ use thiserror::Error;
 use crate::{
     application::{
         activity::ActivityError, deployment::DeploymentError, scanning::ScanningServiceError,
-        takeover::TakeoverError, vault_lifecycle::LifecycleError, workspaces::WorkspaceError,
+        takeover::TakeoverError, trash::TrashError, vault_lifecycle::LifecycleError,
+        workspaces::WorkspaceError,
     },
     operations::OperationError,
     persistence::VaultError,
@@ -53,6 +54,25 @@ impl From<BlockingWorkError> for AppErrorView {
             retryable: true,
             recovery_action: Some("retry".to_owned()),
         }
+    }
+}
+
+impl From<TrashError> for AppErrorView {
+    fn from(error: TrashError) -> Self {
+        app_error(
+            match error {
+                TrashError::InvalidId(_) | TrashError::NotActive => AppErrorCode::InvalidInput,
+                TrashError::Missing => AppErrorCode::NotFound,
+                TrashError::Operation(_) | TrashError::Evidence(_) => {
+                    AppErrorCode::VerificationFailed
+                }
+                TrashError::Repository(_) => AppErrorCode::DatabaseFailure,
+            },
+            "Trash operation unavailable",
+            error.to_string(),
+            false,
+            Some("inspect_trash"),
+        )
     }
 }
 
@@ -114,6 +134,13 @@ impl From<VaultInitializationError> for AppErrorView {
                 AppErrorCode::RecoveryRequired,
                 "Vault operation evidence unavailable",
                 error.to_string(),
+                false,
+                Some("inspect_vault"),
+            ),
+            VaultInitializationError::StartupRecovery(error) => app_error(
+                AppErrorCode::RecoveryRequired,
+                "Vault recovery service unavailable",
+                error,
                 false,
                 Some("inspect_vault"),
             ),

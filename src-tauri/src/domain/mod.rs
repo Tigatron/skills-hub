@@ -9,7 +9,7 @@ mod time;
 pub use digest::{BundleDigest, DigestParseError, RevisionId};
 pub use ids::{
     ActivityId, DeploymentId, ObservationId, OperationId, ProjectId, ScanRunId, SkillId,
-    SnapshotId, TargetId, VaultId, WorkspaceRootId,
+    SnapshotId, TargetId, TrashEntryId, VaultId, WorkspaceRootId,
 };
 pub use names::{
     AdapterId, BundleRelativePath, DeploymentName, NameError, PathCaseSensitivity,

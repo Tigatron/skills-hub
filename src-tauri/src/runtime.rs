@@ -22,6 +22,7 @@ use crate::{
         deployment::DeploymentService,
         scanning::{ScanJobs, ScanningService},
         takeover::TakeoverService,
+        trash::TrashService,
         vault_lifecycle::{LifecycleRecoveryEvidence, VaultLifecycleService},
         workspaces::WorkspaceService,
     },
@@ -51,6 +52,7 @@ struct RuntimeServices {
     coordinator: Arc<OperationCoordinator>,
     takeover: Arc<TakeoverService>,
     deployment: Arc<DeploymentService>,
+    trash: Arc<TrashService>,
     activity: Arc<ActivityService>,
     startup_recovery: Result<StartupRecoveryReport, String>,
 }
@@ -181,6 +183,11 @@ impl AppRuntime {
     pub(crate) fn deployment_service(&self) -> Result<Arc<DeploymentService>, RuntimeStateError> {
         self.ensure_startup_recovery()?;
         Ok(self.services()?.deployment)
+    }
+
+    pub(crate) fn trash_service(&self) -> Result<Arc<TrashService>, RuntimeStateError> {
+        self.ensure_startup_recovery()?;
+        Ok(self.services()?.trash)
     }
 
     pub(crate) fn activity_service(&self) -> Result<Arc<ActivityService>, RuntimeStateError> {
@@ -347,6 +354,10 @@ impl RuntimeServices {
             Arc::clone(&vault),
             Arc::clone(&coordinator),
         ));
+        let trash = Arc::new(
+            TrashService::with_runtime(Arc::clone(&vault), Arc::clone(&coordinator))
+                .map_err(|error| VaultInitializationError::StartupRecovery(error.to_string()))?,
+        );
         let store = OperationStore::open(vault.paths.manager())?;
         let activity = Arc::new(ActivityService::new(vault.repositories.clone(), store));
         let mut services = Self {
@@ -354,6 +365,7 @@ impl RuntimeServices {
             coordinator,
             takeover,
             deployment,
+            trash,
             activity,
             startup_recovery: Ok(StartupRecoveryReport::default()),
         };
@@ -367,6 +379,7 @@ impl RuntimeServices {
             coordinator: Arc::clone(&self.coordinator),
             takeover: Arc::clone(&self.takeover),
             deployment: Arc::clone(&self.deployment),
+            trash: Arc::clone(&self.trash),
             activity: Arc::clone(&self.activity),
             startup_recovery: self.startup_recovery.clone(),
         }
@@ -414,7 +427,12 @@ impl RuntimeServices {
                     .deployment
                     .recover_operation(id)
                     .map_err(|error| error.to_string()),
-                kind => Err(format!("unsupported recovery operation kind: {kind:?}")),
+                crate::operations::OperationKind::MoveToTrash
+                | crate::operations::OperationKind::Restore
+                | crate::operations::OperationKind::PermanentlyDelete => self
+                    .trash
+                    .recover_operation(id)
+                    .map_err(|error| error.to_string()),
             };
             operations.push(match result {
                 Ok(execution) => StartupRecoveryEvidence {
@@ -462,6 +480,7 @@ struct RuntimeServicesSnapshot {
     coordinator: Arc<OperationCoordinator>,
     takeover: Arc<TakeoverService>,
     deployment: Arc<DeploymentService>,
+    trash: Arc<TrashService>,
     activity: Arc<ActivityService>,
     startup_recovery: Result<StartupRecoveryReport, String>,
 }
@@ -485,6 +504,8 @@ pub enum VaultInitializationError {
     Vault(#[from] VaultError),
     #[error("Vault operation store failed: {0}")]
     OperationStore(#[from] crate::operations::JournalError),
+    #[error("startup recovery service failed: {0}")]
+    StartupRecovery(String),
 }
 
 #[derive(Debug, Clone, Default, Serialize, Type)]

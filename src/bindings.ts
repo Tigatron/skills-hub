@@ -178,6 +178,18 @@ async deploymentUndoPlan(request: OperationIdRequest) : Promise<Result<BatchDepl
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * General undo entry point. M0 can invert successful batch deployments. Trash transitions and
+ * other operation kinds are reported unavailable until they have exact inverse evidence.
+ */
+async operationUndoPlan(request: OperationIdRequest) : Promise<Result<OperationUndoPlanView, AppErrorView>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("operation_undo_plan", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async undeployPlan(request: UndeployPlanRequest) : Promise<Result<DeploymentPlanView, AppErrorView>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("undeploy_plan", { request }) };
@@ -253,6 +265,78 @@ async skillGet(request: SkillIdRequest) : Promise<Result<SkillDetail, AppErrorVi
 async skillPreviewFile(request: SkillPreviewRequest) : Promise<Result<TextPreview, AppErrorView>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("skill_preview_file", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async trashMovePlan(request: TrashPlanRequest) : Promise<Result<TrashPlanView, AppErrorView>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("trash_move_plan", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async trashRestorePlan(request: TrashEntryRequest) : Promise<Result<TrashPlanView, AppErrorView>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("trash_restore_plan", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async trashPermanentDeletePlan(request: PermanentDeleteRequest) : Promise<Result<TrashPlanView, AppErrorView>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("trash_permanent_delete_plan", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async trashMoveExecute(request: TrashExecuteRequest) : Promise<Result<TrashExecutionView, AppErrorView>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("trash_move_execute", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async trashRestoreExecute(request: TrashExecuteRequest) : Promise<Result<TrashExecutionView, AppErrorView>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("trash_restore_execute", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async trashPermanentDeleteExecute(request: TrashExecuteRequest) : Promise<Result<TrashExecutionView, AppErrorView>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("trash_permanent_delete_execute", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async trashEntriesList() : Promise<Result<TrashEntryView[], AppErrorView>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("trash_entries_list") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async trashEntryGet(request: TrashEntryRequest) : Promise<Result<TrashEntryView, AppErrorView>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("trash_entry_get", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async trashRetentionSummary() : Promise<Result<TrashRetentionSummary, AppErrorView>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("trash_retention_summary") };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -546,7 +630,9 @@ export type ObservationEvidenceView = { observationId: string; path: string; can
 export type OldVaultCleanupPlan = { operationId: string; planDigest: string; oldVaultPath: string; activeVaultPath: string; vaultId: string }
 export type OperationCancelResult = { operationId: string; cancellationRequested: boolean }
 export type OperationIdRequest = { operationId: string }
+export type OperationUndoPlanView = { status: "available"; plan: BatchDeploymentPlanView } | { status: "conflict"; detail: string; choices: string[] } | { status: "unavailable"; detail: string }
 export type OperationView = { operationId: string; planDigest: string; state: string; outcome: string | null; failure: string | null; recovery: string[]; context: TakeoverOperationContextView; review: TakeoverPlanView; replayed: boolean }
+export type PermanentDeleteRequest = { entryId: string; confirmation: string }
 export type PlatformSummary = { os: string; arch: string; minimumSupportedOs: string }
 export type ReconcileResult = { skillId: string; workingPath: string; previousDigest: string; workingDigest: string; changed: boolean; deploymentsMarkedVaultAhead: number }
 export type RegisterTargetRequest = { kind: FixtureTargetKindDto; selectedDirectory: string; adapterId: string | null; isOverride: boolean | null }
@@ -572,6 +658,14 @@ export type TakeoverPlanRequest = { sourceObservationId: string; decision: Takeo
 export type TakeoverPlanView = { operationId: string; planDigest: string; expiresAt: string; decision: TakeoverDecisionDto; skillId: string; observations: ObservationEvidenceView[]; reviewedDigest: string; workingPath: string; baselineObjectPath: string; manifestPath: string; selectedReplacements: SelectedReplacementView[]; entryCount: number; byteCount: number; blockers: string[]; recoverySummary: string; recoveryCount: number; crossVolumeConsequence: string | null; executionAllowed: boolean }
 export type TargetView = { targetId: string; adapterId: string; scope: string; projectId: string | null; projectKind: string | null; rootPath: string; isOverride: boolean; isCustom: boolean; defaultMode: DeploymentModeDto }
 export type TextPreview = { skillId: string; relativePath: string; size: number; content: string }
+export type TrashBlockerView = { code: string; detail: string; deploymentIds: string[] }
+export type TrashEntryRequest = { entryId: string }
+export type TrashEntryView = { entryId: string; skillId: string; displayName: string; originalWorkingPath: string; trashedAt: string; retentionDeadline: string | null; retentionPolicy: string; protectedReferences: string[] }
+export type TrashExecuteRequest = { operationId: string; planDigest: string }
+export type TrashExecutionView = { operationId: string; outcome: string; replayed: boolean }
+export type TrashPlanRequest = { skillId: string }
+export type TrashPlanView = { operationId: string; planDigest: string; entry: TrashEntryView; blockers: TrashBlockerView[] }
+export type TrashRetentionSummary = { totalEntries: number; expiredEntries: number; protectedEntries: number; nextDeadline: string | null }
 export type UndeployPlanRequest = { deploymentId: string; resolution: UndeployResolutionDto }
 export type UndeployResolutionDto = "remove_managed" | "preserve_target" | "cancel"
 export type VaultPathRequest = { path: string }

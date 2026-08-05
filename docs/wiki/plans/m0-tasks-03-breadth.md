@@ -175,7 +175,7 @@ Implemented on 2026-08-05 in the Rust lifecycle service and typed command bounda
 
 | Field | Value |
 | --- | --- |
-| Status | Planned |
+| Status | Complete (2026-08-05) |
 | Dependencies | M0-008, M0-012 |
 | PRD coverage | DEL-01/02/03/04/05/06, IMP-07 |
 | Design | [Operation model](../domain/operation-recovery-and-trash.md), [Transaction execution](../workflows/transaction-execution.md), [Filesystem safety](../security/filesystem-safety.md), [Identity and state](../domain/identity-and-state.md) |
@@ -222,11 +222,15 @@ All Trash transitions are Operations through the transaction executor. Trash is 
 
 Deletion code must never generalize its scope: cleanup stays bound to exact journal-owned Trash paths per the safety contract. Undo against drifted targets is refused rather than merged; offer recovery choices instead of best-effort restoration.
 
+## Implementation evidence
+
+Completed on 2026-08-05 with schema-v5 internal-Vault Operations for move, restore, and permanent delete. Real temporary-Vault tests prove active-deployment no-plan blocking and byte preservation; exact Trash tree/provenance transfer, stable identity, `Trashed` projection, one Activity and protected operation Snapshot, and write-free terminal replay; occupied-path restore into a fresh UUID container without touching the occupant or recreating deployments; exact-confirmation and protected-reference deletion blockers; exact-entry removal with immutable objects and histories retained; and 30-day/never/expiry retention behavior. The shared executor supplies compensating rollback, finalization recovery, terminal replay, and one operation-level recovery point for destructive operations. User-facing undo is implemented for completed schema-v4 deployment inverses; unsupported Trash inverses are honestly unavailable, and changed postconditions produce conflict/recovery choices rather than silent undo.
+
 # M0-014 — Complete the M0 UI surfaces
 
 | Field | Value |
 | --- | --- |
-| Status | Planned |
+| Status | Complete (2026-08-05) |
 | Dependencies | M0-009, M0-010, M0-011, M0-012, M0-013 |
 | PRD coverage | SCN-05/09, IMP-01/02, DPL-10/12, DEL-01/02/03/04/05, VLT-06; PRD §9 information architecture and §12 UX brief |
 | Design | [Tauri/UI contract](../interfaces/tauri-and-ui-state.md), [System context](../architecture/system-context.md), [Testing and acceptance](../quality/testing-and-acceptance.md) |

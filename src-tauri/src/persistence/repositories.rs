@@ -1776,6 +1776,123 @@ impl Repositories {
         Ok(())
     }
 
+    /// Atomically publishes the `MoveToTrash` lifecycle, Operation, protected Snapshot and Activity.
+    ///
+    /// # Errors
+    /// Returns an error if evidence is invalid or the critical transaction cannot commit.
+    #[allow(clippy::too_many_arguments)]
+    pub fn finalize_move_to_trash(
+        &self,
+        skill_id: SkillId,
+        operation_id: OperationId,
+        plan_digest: String,
+        snapshot_id: SnapshotId,
+        activity_id: ActivityId,
+        now: UtcTimestamp,
+        journal_path: BundleRelativePath,
+        digest: crate::domain::BundleDigest,
+    ) -> Result<(), RepositoryError> {
+        let now_ms = millis(now)?;
+        self.database.execute_critical(move |connection| {
+            let tx = connection.transaction()?;
+            let changed = tx.execute("UPDATE skills SET lifecycle='trashed', updated_at_ms=?2 WHERE id=?1 AND lifecycle='active'", params![skill_id.to_string(), now_ms])?;
+            if changed == 0 {
+                let current: Option<String> = tx.query_row("SELECT lifecycle FROM skills WHERE id=?1", [skill_id.to_string()], |r| r.get(0)).optional()?;
+                if current.as_deref() != Some("trashed") { return Err(rusqlite::Error::QueryReturnedNoRows.into()); }
+            }
+            let operation = OperationValues::try_from(OperationRecord { id: operation_id, plan_digest, operation_type: "move_to_trash".into(), state: OperationState::Finalized, outcome: Some(OperationOutcome::Succeeded), recovery_state: Some("protected".into()), journal_path, created_at: now, updated_at: now, finalized_at: Some(now) }).map_err(|_| rusqlite::Error::InvalidQuery)?;
+            upsert_operation(&tx, &operation)?;
+            tx.execute("INSERT OR IGNORE INTO snapshots(id,operation_id,retention_state,protected,created_at_ms) VALUES(?1,?2,'protected',1,?3)", params![snapshot_id.to_string(), operation_id.to_string(), now_ms])?;
+            tx.execute("INSERT OR IGNORE INTO snapshot_items(snapshot_id,ordinal,digest,entry_fingerprint_json,relation) VALUES(?1,0,?2,NULL,'move_to_trash')", params![snapshot_id.to_string(), digest.to_string()])?;
+            let activity = ActivityValues::try_from(ActivityRecord { id: activity_id, operation_id: Some(operation_id), kind: "move_to_trash".into(), state: "completed".into(), outcome: Some(OperationOutcome::Succeeded), summary: "Moved Skill to Trash".into(), details: serde_json::json!({"skillId": skill_id}), started_at: now, completed_at: Some(now) }).map_err(|_| rusqlite::Error::InvalidQuery)?;
+            insert_activity(&tx, &activity)?;
+            tx.commit()?; Ok(())
+        })?;
+        Ok(())
+    }
+
+    /// Atomically restores a trashed Skill while retaining its provenance and revision history.
+    ///
+    /// # Errors
+    /// Returns an error when lifecycle evidence disagrees or the critical transaction fails.
+    #[allow(clippy::too_many_arguments)]
+    pub fn finalize_restore(
+        &self,
+        skill_id: SkillId,
+        operation_id: OperationId,
+        plan_digest: String,
+        activity_id: ActivityId,
+        now: UtcTimestamp,
+        journal_path: BundleRelativePath,
+        working_path: BundleRelativePath,
+        digest: crate::domain::BundleDigest,
+    ) -> Result<(), RepositoryError> {
+        let now_ms = millis(now)?;
+        self.database.execute_critical(move |connection| {
+            let tx = connection.transaction()?;
+            let changed = tx.execute("UPDATE skills SET lifecycle='active', working_path=?2, working_digest=?3, updated_at_ms=?4 WHERE id=?1 AND lifecycle='trashed'", params![skill_id.to_string(), working_path.to_string(), digest.to_string(), now_ms])?;
+            if changed == 0 { let current: Option<String> = tx.query_row("SELECT lifecycle FROM skills WHERE id=?1", [skill_id.to_string()], |r| r.get(0)).optional()?; if current.as_deref() != Some("active") { return Err(rusqlite::Error::QueryReturnedNoRows.into()); } }
+            let operation = OperationValues::try_from(OperationRecord { id: operation_id, plan_digest, operation_type: "restore".into(), state: OperationState::Finalized, outcome: Some(OperationOutcome::Succeeded), recovery_state: Some("verified".into()), journal_path, created_at: now, updated_at: now, finalized_at: Some(now) }).map_err(|_| rusqlite::Error::InvalidQuery)?;
+            upsert_operation(&tx, &operation)?;
+            let activity = ActivityValues::try_from(ActivityRecord { id: activity_id, operation_id: Some(operation_id), kind: "restore".into(), state: "completed".into(), outcome: Some(OperationOutcome::Succeeded), summary: "Restored Skill from Trash".into(), details: serde_json::json!({"skillId": skill_id}), started_at: now, completed_at: Some(now) }).map_err(|_| rusqlite::Error::InvalidQuery)?;
+            insert_activity(&tx, &activity)?; tx.commit()?; Ok(())
+        })?;
+        Ok(())
+    }
+
+    /// Returns durable references that make removal of a Trash entry ambiguous or unsafe.
+    ///
+    /// # Errors
+    /// Returns an error when the query or a typed projection fails.
+    pub fn permanent_delete_blockers(
+        &self,
+        skill_id: SkillId,
+        digest: BundleDigest,
+    ) -> Result<Vec<String>, RepositoryError> {
+        self.database.execute(move |connection| {
+            let mut blockers = Vec::new();
+            let mut snapshots = connection.prepare(
+                "SELECT DISTINCT s.id FROM snapshots s JOIN snapshot_items i ON i.snapshot_id=s.id WHERE s.protected=1 AND i.digest=?1 ORDER BY s.id")?;
+            blockers.extend(snapshots.query_map([digest.to_string()], |row| Ok(format!("snapshot:{}", row.get::<_, String>(0)?)))?.collect::<Result<Vec<_>, _>>()?);
+            let needle = skill_id.to_string();
+            let mut operations = connection.prepare(
+                "SELECT DISTINCT o.id FROM operations o JOIN operation_steps s ON s.operation_id=o.id WHERE o.finalized_at_ms IS NULL AND (s.precondition_json LIKE ?1 OR coalesce(s.result_json,'') LIKE ?1) ORDER BY o.id")?;
+            blockers.extend(operations.query_map([format!("%{needle}%")], |row| Ok(format!("operation:{}", row.get::<_, String>(0)?)))?.collect::<Result<Vec<_>, _>>()?);
+            Ok(blockers)
+        }).map_err(RepositoryError::Database)
+    }
+
+    /// Atomically finalizes permanent removal while preserving Operation and Activity history.
+    ///
+    /// # Errors
+    /// Returns an error when lifecycle evidence disagrees or the critical transaction fails.
+    #[allow(clippy::too_many_arguments)]
+    pub fn finalize_permanent_delete(
+        &self,
+        skill_id: SkillId,
+        operation_id: OperationId,
+        plan_digest: String,
+        snapshot_id: SnapshotId,
+        activity_id: ActivityId,
+        now: UtcTimestamp,
+        journal_path: BundleRelativePath,
+        digest: BundleDigest,
+    ) -> Result<(), RepositoryError> {
+        let now_ms = millis(now)?;
+        self.database.execute_critical(move |connection| {
+            let tx = connection.transaction()?;
+            let changed = tx.execute("UPDATE skills SET lifecycle='permanently_removed', updated_at_ms=?2 WHERE id=?1 AND lifecycle='trashed'", params![skill_id.to_string(), now_ms])?;
+            if changed == 0 { let current: Option<String> = tx.query_row("SELECT lifecycle FROM skills WHERE id=?1", [skill_id.to_string()], |r| r.get(0)).optional()?; if current.as_deref()!=Some("permanently_removed") { return Err(rusqlite::Error::QueryReturnedNoRows.into()); } }
+            let operation = OperationValues::try_from(OperationRecord { id: operation_id, plan_digest, operation_type: "permanently_delete".into(), state: OperationState::Finalized, outcome: Some(OperationOutcome::Succeeded), recovery_state: Some("protected".into()), journal_path, created_at: now, updated_at: now, finalized_at: Some(now) }).map_err(|_| rusqlite::Error::InvalidQuery)?;
+            upsert_operation(&tx, &operation)?;
+            tx.execute("INSERT OR IGNORE INTO snapshots(id,operation_id,retention_state,protected,created_at_ms) VALUES(?1,?2,'protected',1,?3)", params![snapshot_id.to_string(), operation_id.to_string(), now_ms])?;
+            tx.execute("INSERT OR IGNORE INTO snapshot_items(snapshot_id,ordinal,digest,entry_fingerprint_json,relation) VALUES(?1,0,?2,NULL,'permanent_delete')", params![snapshot_id.to_string(), digest.to_string()])?;
+            let activity = ActivityValues::try_from(ActivityRecord { id: activity_id, operation_id: Some(operation_id), kind: "permanently_delete".into(), state: "completed".into(), outcome: Some(OperationOutcome::Succeeded), summary: "Permanently removed Skill".into(), details: serde_json::json!({"skillId": skill_id}), started_at: now, completed_at: Some(now) }).map_err(|_| rusqlite::Error::InvalidQuery)?;
+            insert_activity(&tx, &activity)?; tx.commit()?; Ok(())
+        })?;
+        Ok(())
+    }
+
     /// Atomically publishes every durable read model produced by takeover.
     ///
     /// # Errors

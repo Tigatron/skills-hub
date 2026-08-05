@@ -88,6 +88,7 @@ uuid_v7_id!(TargetId, "Target");
 uuid_v7_id!(DeploymentId, "Deployment");
 uuid_v7_id!(OperationId, "Operation");
 uuid_v7_id!(SnapshotId, "Snapshot");
+uuid_v7_id!(TrashEntryId, "Trash entry");
 uuid_v7_id!(ActivityId, "Activity");
 uuid_v7_id!(VaultId, "Vault");
 uuid_v7_id!(WorkspaceRootId, "Workspace root");

@@ -85,6 +85,26 @@ export function OperationPanel({
 }
 
 function PlanReview({ plan }: { plan: ReviewedPlan }) {
+  if (plan.kind === 'trash') {
+    const view = plan.plan;
+    return (
+      <div className={styles.planBox}>
+        <h3>Trash plan</h3>
+        <dl className={styles.metaList}>
+          <MetaRow label="Action" value={plan.action.replaceAll('_', ' ')} />
+          <MetaRow label="Skill" value={view.entry.displayName} />
+          <MetaRow
+            label="Original path"
+            value={<PathText path={view.entry.originalWorkingPath} />}
+          />
+          <MetaRow label="Retention" value={view.entry.retentionPolicy} />
+        </dl>
+        {view.blockers.map((blocker) => (
+          <p key={blocker.code}>Blocker: {blocker.detail}</p>
+        ))}
+      </div>
+    );
+  }
   if (plan.kind === 'takeover') {
     const view = plan.plan;
     return (
@@ -158,6 +178,9 @@ function PlanReview({ plan }: { plan: ReviewedPlan }) {
 }
 
 function executionAllowed(plan: ReviewedPlan): boolean {
+  if (plan.kind === 'trash') {
+    return Boolean(plan.plan.operationId) && plan.plan.blockers.length === 0;
+  }
   if (plan.kind === 'takeover') {
     return plan.plan.executionAllowed;
   }

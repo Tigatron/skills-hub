@@ -23,6 +23,8 @@ Skills Hub cannot provide one OS-atomic commit across unrelated target volumes. 
 
 M0-005 implements the generic transaction kernel through persisted terminal outcomes: canonical plan sealing/loading, exact Snapshot attestations, one per-Vault serialization seam, stage-all, deterministic commit/verify/finalization hooks, reverse rollback, exact artifact cleanup, and conservative startup classification. M0-008 adds the idempotent action driver for every classifier result, schema-v4 2–20 Target plans, journal-to-Activity rebuilding, and reviewed inverse Operations. Real-tree failpoint tests cover every target-index stage/backup/final/verify boundary, manifest and SQLite interruption, every rollback durability boundary, and repeated parent-driven child-process kills followed by action-driving reopen.
 
+M0-013 reuses this kernel for schema-v5 internal-Vault MoveToTrash, Restore, and PermanentlyDelete Operations. Their plans use only Rust-derived paths beneath the authorized Vault, protect each destructive source at operation level, stage before commit, verify exact content, finalize durable lifecycle/Activity/Snapshot projections, and inherit rollback, startup finalization recovery, and terminal replay. This does not add Trash-specific inverse planning; the user-facing inverse remains the schema-v4 deployment path with explicit unavailable/conflict results elsewhere.
+
 # Persisted plan and fingerprints
 
 An immutable plan includes a digest over canonical serialized content. Every mutable path has a before fingerprint:

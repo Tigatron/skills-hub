@@ -8,7 +8,7 @@ use fs2::FileExt;
 use thiserror::Error;
 
 use crate::{
-    domain::{DeploymentName, SkillId, UtcTimestamp},
+    domain::{DeploymentName, SkillId, TrashEntryId, UtcTimestamp},
     filesystem::ObjectStore,
 };
 
@@ -78,6 +78,37 @@ impl VaultPaths {
         self.skills()
             .join(id.to_string())
             .join(deployment_name.as_str())
+    }
+
+    #[must_use]
+    pub fn skill_container(&self, id: SkillId) -> PathBuf {
+        self.skills().join(id.to_string())
+    }
+
+    #[must_use]
+    pub fn trash(&self) -> PathBuf {
+        self.manager.join("trash")
+    }
+
+    #[must_use]
+    pub fn trash_skill(&self, id: SkillId) -> PathBuf {
+        self.trash().join(id.to_string())
+    }
+
+    #[must_use]
+    pub fn trash_entry(&self, _skill_id: SkillId, entry_id: TrashEntryId) -> PathBuf {
+        self.trash().join(entry_id.to_string())
+    }
+
+    #[must_use]
+    pub fn trash_entry_bundle(&self, skill_id: SkillId, entry_id: TrashEntryId) -> PathBuf {
+        self.trash_entry(skill_id, entry_id).join("working")
+    }
+
+    #[must_use]
+    pub fn trash_entry_manifest(&self, skill_id: SkillId, entry_id: TrashEntryId) -> PathBuf {
+        let _ = skill_id;
+        self.trash().join(format!("{entry_id}.json"))
     }
 
     fn required_directories(&self) -> Vec<PathBuf> {
