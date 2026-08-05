@@ -39,7 +39,21 @@ pub(crate) fn builder() -> Builder<tauri::Wry> {
             crate::commands::takeover::skill_get,
             crate::commands::takeover::skill_preview_file,
             crate::commands::activity::activity_list,
-            crate::commands::activity::activity_detail
+            crate::commands::activity::activity_detail,
+            crate::commands::vault_lifecycle::vault_reconcile_working,
+            crate::commands::vault_lifecycle::vault_verify,
+            crate::commands::vault_lifecycle::vault_repair_plan,
+            crate::commands::vault_lifecycle::vault_repair_execute,
+            crate::commands::vault_lifecycle::vault_index_rebuild_plan,
+            crate::commands::vault_lifecycle::vault_index_rebuild_execute,
+            crate::commands::vault_lifecycle::vault_object_gc_plan,
+            crate::commands::vault_lifecycle::vault_object_gc_execute,
+            crate::commands::vault_lifecycle::vault_object_gc_settings,
+            crate::commands::vault_lifecycle::vault_reveal_working,
+            crate::commands::vault_lifecycle::vault_relocate_plan,
+            crate::commands::vault_lifecycle::vault_relocate_execute,
+            crate::commands::vault_lifecycle::vault_old_cleanup_plan,
+            crate::commands::vault_lifecycle::vault_old_cleanup_execute
         ])
         .events(collect_events![
             crate::application::scanning::ScanProgress,

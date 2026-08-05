@@ -197,6 +197,108 @@ impl From<ActivityError> for AppErrorView {
     }
 }
 
+impl From<LifecycleError> for AppErrorView {
+    fn from(error: LifecycleError) -> Self {
+        match error {
+            LifecycleError::SkillMissing => app_error(
+                AppErrorCode::NotFound,
+                "Skill not found",
+                error.to_string(),
+                false,
+                None,
+            ),
+            LifecycleError::Repository(_)
+            | LifecycleError::Database(_)
+            | LifecycleError::Migration(_) => app_error(
+                AppErrorCode::DatabaseFailure,
+                "Vault index unavailable",
+                error.to_string(),
+                true,
+                Some("retry"),
+            ),
+            LifecycleError::Bundle(_)
+            | LifecycleError::ObjectStore(_)
+            | LifecycleError::Time(_)
+            | LifecycleError::Manifest(_)
+            | LifecycleError::Journal(_)
+            | LifecycleError::InvalidDurableInput { .. }
+            | LifecycleError::IntegrityFailed => app_error(
+                AppErrorCode::VerificationFailed,
+                "Vault verification failed",
+                error.to_string(),
+                false,
+                Some("inspect_vault"),
+            ),
+            LifecycleError::StalePlan
+            | LifecycleError::StaleManifest
+            | LifecycleError::AmbiguousRepair => app_error(
+                AppErrorCode::StalePlan,
+                "Lifecycle plan is no longer safe",
+                error.to_string(),
+                false,
+                Some("review_again"),
+            ),
+            LifecycleError::Operation(error) => app_error(
+                AppErrorCode::OperationBusy,
+                "Lifecycle operation could not start",
+                error.to_string(),
+                true,
+                Some("retry"),
+            ),
+            LifecycleError::Durability(_)
+            | LifecycleError::Json(_)
+            | LifecycleError::RecoveryRequired
+            | LifecycleError::AmbiguousLifecycleEvidence(_) => app_error(
+                AppErrorCode::RecoveryRequired,
+                "Lifecycle evidence unavailable",
+                error.to_string(),
+                false,
+                Some("inspect_vault"),
+            ),
+            LifecycleError::Io(_) | LifecycleError::FinderFailed => app_error(
+                AppErrorCode::IoFailure,
+                "Vault inspection failed",
+                error.to_string(),
+                true,
+                Some("retry"),
+            ),
+            LifecycleError::UnsafeRevealPath(_)
+            | LifecycleError::UnsafeRebuildPath(_)
+            | LifecycleError::UnsafeGcPath(_)
+            | LifecycleError::UnsafeRelocation(_)
+            | LifecycleError::CapabilityBlocked(_) => app_error(
+                AppErrorCode::UnsafePath,
+                "Cannot reveal working Bundle",
+                error.to_string(),
+                false,
+                None,
+            ),
+            #[cfg(not(target_os = "macos"))]
+            LifecycleError::FinderUnsupported => app_error(
+                AppErrorCode::UnsafePath,
+                "Cannot reveal working Bundle",
+                error.to_string(),
+                false,
+                None,
+            ),
+            LifecycleError::GcDisabled(_) => app_error(
+                AppErrorCode::RecoveryRequired,
+                "Object cleanup is disabled",
+                error.to_string(),
+                false,
+                Some("inspect_vault"),
+            ),
+            LifecycleError::CutoverFailed(_) => app_error(
+                AppErrorCode::RolledBack,
+                "Vault cutover was rolled back",
+                error.to_string(),
+                true,
+                Some("review_again"),
+            ),
+        }
+    }
+}
+
 impl From<ScanningServiceError> for AppErrorView {
     fn from(error: ScanningServiceError) -> Self {
         match error {

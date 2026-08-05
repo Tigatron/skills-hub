@@ -72,6 +72,14 @@ impl DbExecutor {
         })
     }
 
+    /// Flushes and removes this connection's WAL before a caller-managed index replacement.
+    pub(crate) fn checkpoint_for_replacement(&self) -> Result<(), DbExecutorError> {
+        self.execute(|connection| {
+            connection.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
+            Ok(())
+        })
+    }
+
     pub(crate) fn execute<T, F>(&self, work: F) -> Result<T, DbExecutorError>
     where
         T: Send + 'static,

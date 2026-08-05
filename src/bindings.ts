@@ -273,6 +273,190 @@ export type DeploymentQuery = { skillId: string | null; targetId: string | null;
 export type DomainInvalidated = { revision: number; scopes: string[]; ids: string[] }
 export type DuplicateSummary = { exactDuplicateLocations: number; nameConflicts: number; probableDuplicatesOrRenames: number; unverified: boolean }
 export type ExecuteOperationRequest = { operationId: string; planDigest: string }
+},
+async vaultReconcileWorking(request: SkillLifecycleRequest) : Promise<Result<ReconcileResult, AppErrorView>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("vault_reconcile_working", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async vaultVerify() : Promise<Result<VaultVerifyReport, AppErrorView>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("vault_verify") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async vaultRepairPlan() : Promise<Result<VaultRepairPlan, AppErrorView>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("vault_repair_plan") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async vaultRepairExecute(request: ExecuteLifecycleRequest) : Promise<Result<number, AppErrorView>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("vault_repair_execute", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async vaultIndexRebuildPlan() : Promise<Result<IndexRebuildPlan, AppErrorView>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("vault_index_rebuild_plan") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async vaultIndexRebuildExecute(request: ExecuteLifecycleRequest) : Promise<Result<IndexRebuildResult, AppErrorView>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("vault_index_rebuild_execute", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async vaultObjectGcPlan(request: ObjectGcPlanRequest) : Promise<Result<ObjectGcPlan, AppErrorView>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("vault_object_gc_plan", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async vaultObjectGcExecute(request: ExecuteLifecycleRequest) : Promise<Result<ObjectGcResult, AppErrorView>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("vault_object_gc_execute", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async vaultObjectGcSettings() : Promise<Result<ObjectGcSettingsSummary, AppErrorView>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("vault_object_gc_settings") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async vaultRevealWorking(request: SkillLifecycleRequest) : Promise<Result<string, AppErrorView>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("vault_reveal_working", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async vaultRelocatePlan(request: VaultPathRequest) : Promise<Result<VaultRelocatePlan, AppErrorView>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("vault_relocate_plan", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async vaultRelocateExecute(request: ExecuteLifecycleRequest) : Promise<Result<VaultRelocateResult, AppErrorView>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("vault_relocate_execute", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async vaultOldCleanupPlan(request: VaultPathRequest) : Promise<Result<OldVaultCleanupPlan, AppErrorView>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("vault_old_cleanup_plan", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async vaultOldCleanupExecute(request: ExecuteLifecycleRequest) : Promise<Result<null, AppErrorView>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("vault_old_cleanup_execute", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async workspaceRootAdd(request: WorkspaceRootAddRequest) : Promise<Result<WorkspaceRootView, AppErrorView>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("workspace_root_add", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async workspaceRootUpdate(request: WorkspaceRootUpdateRequest) : Promise<Result<WorkspaceRootView, AppErrorView>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("workspace_root_update", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async workspaceRootPause(request: WorkspaceRootPauseRequest) : Promise<Result<WorkspaceRootView, AppErrorView>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("workspace_root_pause", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async workspaceRootRemove(request: WorkspaceRootIdRequest) : Promise<Result<WorkspaceRemoveResult, AppErrorView>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("workspace_root_remove", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async workspaceRootRescan(request: WorkspaceRootIdRequest) : Promise<Result<WorkspaceScanResultView, AppErrorView>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("workspace_root_rescan", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async workspaceRootsList() : Promise<Result<WorkspaceRootView[], AppErrorView>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("workspace_roots_list") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async manualProjectAdd(request: ManualProjectAddRequest) : Promise<Result<ManualProjectView, AppErrorView>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("manual_project_add", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async manualProjectsList() : Promise<Result<ManualProjectView[], AppErrorView>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("manual_projects_list") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async manualProjectRescan(request: ManualProjectIdRequest) : Promise<Result<WorkspaceScanResultView, AppErrorView>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("manual_project_rescan", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 export type FixtureTargetKindDto = "global" | "git_project" | "personal_project"
 export type InitializeVaultRequest = { selectedDirectory: string | null }
 export type JobRef = { jobId: string }
@@ -307,7 +491,7 @@ export type SkillDetail = { skillId: string; displayName: string; deploymentName
 export type SkillIdRequest = { skillId: string }
 export type SkillPreviewRequest = { skillId: string; relativePath: string }
 export type StartupRecoveryEvidence = { operationId: string; status: string; outcome: string | null; error: string | null }
-export type StartupRecoveryReport = { completed: boolean; operations: StartupRecoveryEvidence[] }
+export type StartupRecoveryReport = { completed: boolean; operations: StartupRecoveryEvidence[]; lifecycleOperations: LifecycleRecoveryEvidence[] }
 export type TakeoverDecisionDto = "add_to_vault" | "add_and_manage"
 export type TakeoverOperationContextView = { decision: TakeoverDecisionDto; sourceObservationId: string; skillId: string; workingPath: string; selectedObservationIds: string[] }
 export type TakeoverPlanRequest = { sourceObservationId: string; decision: TakeoverDecisionDto; selectedLocations: SelectedLocationRequest[] }
@@ -327,10 +511,14 @@ import {
 } from "@tauri-apps/api/core";
 import * as TAURI_API_EVENT from "@tauri-apps/api/event";
 import { type WebviewWindow as __WebviewWindow__ } from "@tauri-apps/api/webviewWindow";
+export type DestinationCapabilityReport = { status: CapabilityStatus; writeFile: boolean; createDirectory: boolean; symlink: boolean; executableBit: boolean; atomicRename: boolean; fileFsync: boolean; directoryFsync: boolean; advisoryLock: boolean; caseSensitive: boolean; availableBytes: string | null; requiredBytes: string; blockers: string[] }
 
 type __EventObj__<T> = {
+export type ExecuteLifecycleRequest = { operationId: string; planDigest: string }
 	listen: (
 		cb: TAURI_API_EVENT.EventCallback<T>,
+export type IndexRebuildPlan = { operationId: string; planDigest: string; blockers: VaultVerifyIssue[]; skillManifestPaths: string[]; deploymentManifestPaths: string[]; operationJournalPaths: string[]; unresolvedOperationIds: string[] }
+export type IndexRebuildResult = { rebuiltSkills: number; rebuiltDeployments: number; rebuiltOperations: number; backupPath: string; restartRequired: boolean }
 	) => ReturnType<typeof TAURI_API_EVENT.listen<T>>;
 	once: (
 		cb: TAURI_API_EVENT.EventCallback<T>,
@@ -344,7 +532,18 @@ export type Result<T, E> =
 	| { status: "ok"; data: T }
 	| { status: "error"; error: E };
 
+export type LifecycleRecoveryEvidence = { operationId: string; classification: string; blocking: boolean }
+export type ManualProjectAddRequest = { selectedPath: string }
+export type ManualProjectIdRequest = { projectId: string }
+export type ManualProjectView = { projectId: string; rootPath: string; canonicalPath: string; git: boolean }
+export type ObjectGcCandidate = { digest: string; exactPath: string; createdAt: string; retentionDeadline: string; pendingOwnerOperationId: string | null }
+export type ObjectGcPhase = "stage_pending_delete" | "delete_pending"
+export type ObjectGcPlan = { operationId: string; planDigest: string; phase: ObjectGcPhase; enabled: boolean; retentionDays: number; candidates: ObjectGcCandidate[]; blockers: string[]; referencedObjects: number; inspectedObjects: number }
+export type ObjectGcPlanRequest = { phase: ObjectGcPhase }
+export type ObjectGcResult = { operationId: string; phase: ObjectGcPhase; affectedObjects: number; evidencePath: string }
+export type ObjectGcSettingsSummary = { retentionDays: number; lastRun: string | null; eligible: boolean; nextRun: string | null; disabledReasons: string[] }
 function __makeEvents__<T extends Record<string, any>>(
+export type OldVaultCleanupPlan = { operationId: string; planDigest: string; oldVaultPath: string; activeVaultPath: string; vaultId: string }
 	mappings: Record<keyof T, string>,
 ) {
 	return new Proxy(
@@ -363,6 +562,7 @@ function __makeEvents__<T extends Record<string, any>>(
 						once: (arg: any) => window.once(name, arg),
 						emit: (arg: any) => window.emit(name, arg),
 					}),
+export type SkillLifecycleRequest = { skillId: string }
 					get: (_, command: keyof __EventObj__<any>) => {
 						switch (command) {
 							case "listen":
@@ -374,7 +574,24 @@ function __makeEvents__<T extends Record<string, any>>(
 						}
 					},
 				});
+export type VaultPathRequest = { path: string }
+export type VaultRelocatePlan = { operationId: string; planDigest: string; oldVaultPath: string; destinationPath: string; stagingPath: string; vaultId: string; capability: DestinationCapabilityReport }
+export type VaultRelocateResult = { operationId: string; oldVaultPath: string; activeVaultPath: string; rewrittenSymlinks: number; restartRequired: boolean; oldVaultRetained: boolean }
+export type VaultRepairAction = { kind: string; exactPath: string; reason: string; requiresReviewedOperation: boolean }
+export type VaultRepairPlan = { operationId: string; planDigest: string; writable: boolean; actions: VaultRepairAction[]; refused: VaultVerifyIssue[] }
 			},
 		},
+export type VaultVerifyIssue = { code: string; path: string; detail: string; repairable: boolean }
+export type VaultVerifyReport = { healthy: boolean; checkedSkills: number; checkedObjects: number; issues: VaultVerifyIssue[] }
+export type WorkspaceDiagnosticView = { path: string; code: string; summary: string }
+export type WorkspaceProjectBatchEvent = { rootId: string; projectRoot: string; projectKind: string; skillCount: number; errorCount: number; observations: WorkspaceProjectObservationView[]; diagnostics: WorkspaceDiagnosticView[]; batchComplete: boolean }
+export type WorkspaceProjectObservationView = { adapterId: string; displayPath: string; status: string }
+export type WorkspaceRemoveResult = { rootId: string; removed: boolean; noFilesChanged: boolean }
+export type WorkspaceRootAddRequest = { selectedPath: string; maximumDepth: number | null; ignoreRules: string[] }
+export type WorkspaceRootIdRequest = { rootId: string }
+export type WorkspaceRootPauseRequest = { rootId: string; paused: boolean }
+export type WorkspaceRootUpdateRequest = { rootId: string; selectedPath: string | null; maximumDepth: number | null; ignoreRules: string[] | null }
+export type WorkspaceRootView = { rootId: string; selectedPath: string; canonicalPath: string; enabled: boolean; paused: boolean; maximumDepth: number; ignoreRules: string[]; coverageState: string; lastAttempt: string | null; lastSuccessfulCompleteScan: string | null; projectCount: number; skillCount: number; errorCount: number; errors: WorkspaceDiagnosticView[]; noFilesChanged: boolean }
+export type WorkspaceScanResultView = { rootId: string; coverageState: string; complete: boolean; projectCount: number; skillCount: number; errorCount: number; streamedProjectBatches: number; noFilesChanged: boolean }
 	);
 }

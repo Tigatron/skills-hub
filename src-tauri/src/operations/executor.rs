@@ -75,6 +75,17 @@ impl OperationCoordinator {
             Err(TryLockError::Poisoned(_)) => Err(OperationError::CoordinatorUnavailable),
         }
     }
+
+    /// Runs a Vault-root lifecycle transaction under the same single-writer gate as target
+    /// mutations. Lifecycle actions have their own exact-path journal because they cannot be
+    /// represented as target replacement steps.
+    pub(crate) fn run_lifecycle<T, E>(&self, action: impl FnOnce() -> Result<T, E>) -> Result<T, E>
+    where
+        E: From<OperationError>,
+    {
+        let _guard = self.acquire().map_err(E::from)?;
+        action()
+    }
 }
 
 /// Authorized roots keyed only by durable target identity.

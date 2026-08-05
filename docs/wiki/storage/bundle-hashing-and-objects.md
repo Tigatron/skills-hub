@@ -129,6 +129,8 @@ The working Bundle is editable ordinary content. A Revision is an immutable rela
 
 M0 does not model remote upstream revisions. External edits update the working digest and deployment health but do not overwrite prior objects.
 
+The implemented reconciliation path hashes the real working tree twice around manifest/index precondition checks, atomically updates the readable Skill manifest and derived Skill row, and marks active deployments `VaultAhead`. It never opens working content for writing or publishes an object. Real temporary-Vault acceptance evidence compares every working file's relative path and exact bytes before and after reconciliation.
+
 # Retention and garbage collection
 
 References come from Skill baselines, Snapshots, protected Operations, and Trash entries. Object GC is allowed only when:
@@ -140,6 +142,8 @@ References come from Skill baselines, Snapshots, protected Operations, and Trash
 - deletion is constrained to its exact, validated object path.
 
 GC first moves the object to an internal pending-delete area and records Activity; physical deletion occurs in a later verified pass. If the index is unhealthy, GC is disabled rather than guessing.
+
+The implemented reference pass conservatively retains digests found in Skill manifests and baseline rows, revisions, Snapshot items, deployment manifests/rows, Trash JSON, protected or unresolved standard Operation evidence, and lifecycle-operation journals. Manifest/index count or identity divergence, SQLite integrity/foreign-key failure, malformed durable JSON, or ambiguous/truncated digest evidence disables collection. A reviewed first-phase plan can only rename an exact verified content-addressed object into `.manager/pending-delete/<operation-id>/` with owner evidence; a separately reviewed later pass re-verifies references, retention, ownership, path containment, metadata, and bundle digest before physical deletion.
 
 # Golden-vector requirements
 

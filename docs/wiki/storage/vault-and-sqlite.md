@@ -176,6 +176,14 @@ Workspace authorization and custom machine paths may require re-selection if mac
 
 Relocation preserves `vaultId`, Skill IDs, deployment IDs, and content digests. It is not M2 cross-device migration or Git backup.
 
+## Implemented lifecycle and recovery contract
+
+M0 lifecycle planning writes reviewed plans and journals only under `.manager/lifecycle-operations/<operation-id>/`; this namespace is intentionally separate from the generic target-operation store while sharing its single-writer coordinator. Verify and index-rebuild planning do not mutate working content or the active index. Repair execution accepts only a digest-matching reviewed plan and an absent exact manifest path owned by one indexed Skill; changed, mismatched, or ambiguous evidence is refused. See [Bundle hashing and objects](bundle-hashing-and-objects.md) for external-edit and GC reference behavior and [Transaction execution](../workflows/transaction-execution.md) for mutation serialization.
+
+Index rebuild creates and integrity-checks a staged database, checkpoints the live database, retains `index-before-rebuild-<operation-id>.sqlite`, and atomically replaces the file. Skill and deployment IDs/digests come from manifests; durable standard Operation journals restore operation identity and unresolved state without inventing missing provenance. The result is explicitly restart-required because already-open repository handles remain bound to the retained old database.
+
+Relocation persists capability and step evidence before mutation, copies into an operation-owned sibling staging directory, verifies Vault identity/manifests/working and object digests/index integrity, then switches device settings and rewrites only managed absolute links that still match their recorded old targets. Failure before cutover leaves settings and the old Vault authoritative; interrupted cutover remains recovery-blocking with both versions retained. Success preserves stable identities and also requires restart. Deleting the old Vault is a separate digest-confirmed operation and is never implied by relocation success.
+
 # Secrets and privacy
 
 M0 stores no credentials. Absolute local source/target paths may exist in the local index and internal manifests because they are required for operation, but they are not portable export content. Future diagnostics must redact them according to the PRD.

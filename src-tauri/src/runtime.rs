@@ -43,10 +43,12 @@ struct RuntimeServices {
     activity: Arc<ActivityService>,
     startup_recovery: Result<StartupRecoveryReport, String>,
 }
+    restart_required: Arc<AtomicBool>,
 
 impl AppRuntime {
     pub fn foundation() -> Self {
         let home = std::env::var_os("HOME").map(PathBuf::from);
+    coordinator: Arc<OperationCoordinator>,
         Self::foundation_for_home(home)
     }
 
@@ -309,12 +311,19 @@ struct RuntimeServicesSnapshot {
 pub(crate) struct RuntimeVaultSummary {
     pub root_path: PathBuf,
     pub vault_id: String,
+        if self.restart_required.load(Ordering::Acquire) {
+            return Err(RuntimeStateError::RestartRequired);
+        }
 }
 
 pub(crate) struct RuntimeVaultStatus {
     pub summary: RuntimeVaultSummary,
     pub startup_recovery_completed: Option<bool>,
 }
+    pub(crate) fn enter_restart_required(&self) {
+        self.restart_required.store(true, Ordering::Release);
+    }
+
 
 #[derive(Debug, Error)]
 pub enum VaultInitializationError {
@@ -372,6 +381,20 @@ impl BlockingWorkPool {
         Ok(result)
     }
 }
+        let lifecycle = VaultLifecycleService::with_runtime(
+            Arc::clone(vault),
+            Arc::clone(&self.coordinator),
+            PathBuf::new(),
+        )
+        .recover_startup()
+        .map_err(|error| error.to_string())?;
+        if !lifecycle.completed {
+            return Ok(StartupRecoveryReport {
+                completed: false,
+                operations: Vec::new(),
+                lifecycle_operations: lifecycle.operations,
+            });
+        }
 
 fn open_configured_vault(home: &Path) -> Option<Arc<OpenVault>> {
     let application_support = default_application_support(home);
@@ -428,6 +451,7 @@ mod tests {
             runtime.blocking_worker_limit(),
             DEFAULT_BLOCKING_WORKER_LIMIT
         );
+            lifecycle_operations: lifecycle.operations,
     }
 
     #[test]
@@ -435,6 +459,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let runtime = AppRuntime::foundation_for_home(Some(home.path().to_path_buf()));
 
+    coordinator: Arc<OperationCoordinator>,
         assert!(runtime.vault_status().unwrap().is_none());
         assert!(matches!(
             runtime.scanning_service(),
@@ -467,6 +492,7 @@ mod tests {
             .unwrap_err()
             .into();
         assert!(matches!(relative.code, AppErrorCode::UnsafePath));
+    pub lifecycle_operations: Vec<LifecycleRecoveryEvidence>,
 
         let nested_runtime = AppRuntime::foundation_for_home(Some(home.path().to_path_buf()));
         let nested: AppErrorView = nested_runtime
@@ -490,3 +516,5 @@ mod tests {
         ));
     }
 }
+    #[error("Vault maintenance completed; restart is required before runtime services can be used")]
+    RestartRequired,

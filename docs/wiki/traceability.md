@@ -21,10 +21,10 @@ Every mutation-bearing requirement additionally passes the consolidated hardenin
 | VLT-02 | P0 | [Vault and SQLite](storage/vault-and-sqlite.md) | [M0-003](plans/m0-tasks-01-foundation.md) | M0-003 layout/manifest readability tests |
 | VLT-03 | P0 | [Vault and SQLite](storage/vault-and-sqlite.md), [System context](architecture/system-context.md) | [M0-003](plans/m0-tasks-01-foundation.md) | M0-003 no-content-blob schema test |
 | VLT-04 | P0 | [Bundle hashing and objects](storage/bundle-hashing-and-objects.md) | [M0-002](plans/m0-tasks-01-foundation.md) (hash), [M0-003](plans/m0-tasks-01-foundation.md) (object store) | M0-002 golden vectors; M0-003 dedupe/corruption tests |
-| VLT-05 | P0 | [Scanning and reconciliation](workflows/scanning-and-reconciliation.md) (watchers), [Bundle hashing and objects](storage/bundle-hashing-and-objects.md) (working versions) | Watcher foundation in [M0-010](plans/m0-tasks-03-breadth.md); Vault edit marking in [M0-012](plans/m0-tasks-03-breadth.md) | M0-012 external-edit no-overwrite tests |
-| VLT-06 | P0 | [Vault and SQLite](storage/vault-and-sqlite.md) (verify/repair/relocate) | [M0-012](plans/m0-tasks-03-breadth.md), Settings entry points in [M0-014](plans/m0-tasks-03-breadth.md) | M0-012 verify/repair/relocate integration tests |
-| VLT-07 | P1 | [Vault and SQLite](storage/vault-and-sqlite.md) (index rebuild) | [M0-012](plans/m0-tasks-03-breadth.md) | M0-012 rebuild-from-manifests tests |
-| VLT-08 | P1 | [Bundle hashing and objects](storage/bundle-hashing-and-objects.md) (retention/GC) | [M0-012](plans/m0-tasks-03-breadth.md) | M0-012 GC reference matrix tests |
+| VLT-05 | P0 | [Scanning and reconciliation](workflows/scanning-and-reconciliation.md) (watchers), [Bundle hashing and objects](storage/bundle-hashing-and-objects.md) (working versions) | Watcher foundation in [M0-010](plans/m0-tasks-03-breadth.md); Vault edit marking implemented in [M0-012](plans/m0-tasks-03-breadth.md) | M0-012 real-Vault digest/manifest/index and byte-tree no-overwrite test passes |
+| VLT-06 | P0 | [Vault and SQLite](storage/vault-and-sqlite.md) (verify/repair/relocate) | Lifecycle backend implemented in [M0-012](plans/m0-tasks-03-breadth.md); Settings entry points in [M0-014](plans/m0-tasks-03-breadth.md) | M0-012 exact-path read-only verify, repair refusal, relocation preflight/recovery/cleanup tests pass |
+| VLT-07 | P1 | [Vault and SQLite](storage/vault-and-sqlite.md) (index rebuild) | Implemented in [M0-012](plans/m0-tasks-03-breadth.md) | M0-012 manifest/journal rebuild, retained-backup, and restart-required contract |
+| VLT-08 | P1 | [Bundle hashing and objects](storage/bundle-hashing-and-objects.md) (retention/GC) | Implemented in [M0-012](plans/m0-tasks-03-breadth.md) | M0-012 conservative reference pass, two-phase ownership/containment, and unhealthy/divergent-index refusal tests |
 
 # Scanning and discovery (SCN)
 

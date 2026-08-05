@@ -104,6 +104,74 @@ impl Repositories {
             .map_err(RepositoryError::Database)
     }
 
+    /// Returns every indexed Skill in stable identifier order.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `SQLite` is unavailable or an indexed value is invalid.
+    pub fn skills(&self) -> Result<Vec<SkillRecord>, RepositoryError> {
+        self.database
+            .execute(|connection| {
+                let mut statement = connection.prepare(
+                    "SELECT id, display_name, deployment_name, working_path, working_digest,
+                            baseline_digest, lifecycle, created_at_ms, updated_at_ms
+                     FROM skills ORDER BY id",
+                )?;
+                statement
+                    .query_map([], |row| {
+                        let id = parse_text(&row.get::<_, String>(0)?, 0)?;
+                        Ok(SkillRecord {
+                            id,
+                            display_name: row.get(1)?,
+                            deployment_name: parse_deployment_name(&row.get::<_, String>(2)?, 2)?,
+                            working_path: parse_text(&row.get::<_, String>(3)?, 3)?,
+                            working_digest: parse_text(&row.get::<_, String>(4)?, 4)?,
+                            baseline_digest: parse_text(&row.get::<_, String>(5)?, 5)?,
+                            lifecycle: parse_skill_lifecycle(&row.get::<_, String>(6)?, 6)?,
+                            created_at: parse_millis(row.get(7)?, 7)?,
+                            updated_at: parse_millis(row.get(8)?, 8)?,
+                        })
+                    })?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(DbExecutorError::Sqlite)
+            })
+            .map_err(RepositoryError::Database)
+    }
+
+    /// Performs `SQLite`'s full integrity check. This is read-only.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the database cannot execute the integrity check.
+    pub fn index_integrity(&self) -> Result<String, RepositoryError> {
+        self.database
+            .execute(|connection| {
+                connection
+                    .query_row("PRAGMA integrity_check", [], |row| row.get(0))
+                    .map_err(DbExecutorError::Sqlite)
+            })
+            .map_err(RepositoryError::Database)
+    }
+
+    /// Returns the number of rows reported by `SQLite`'s foreign-key checker.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the database cannot execute the foreign-key check.
+    pub fn foreign_key_violation_count(&self) -> Result<u64, RepositoryError> {
+        self.database
+            .execute(|connection| {
+                let mut statement = connection.prepare("PRAGMA foreign_key_check")?;
+                let mut rows = statement.query([])?;
+                let mut count = 0_u64;
+                while rows.next()?.is_some() {
+                    count = count.saturating_add(1);
+                }
+                Ok(count)
+            })
+            .map_err(RepositoryError::Database)
+    }
+
     /// Returns every source recorded for a Skill.
     ///
     /// # Errors
@@ -1410,6 +1478,26 @@ pub struct WorkspaceRootRecord {
     pub id: WorkspaceRootId,
     pub selected_path: PathBuf,
     pub canonical_path: PathBuf,
+    /// Returns every deployment without the interactive-list safety cap.
+    ///
+    /// Lifecycle integrity checks must never silently truncate their enumeration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the database is unavailable or a row is invalid.
+    pub fn all_deployments(&self) -> Result<Vec<DeploymentRecord>, RepositoryError> {
+        self.database.execute(|connection| {
+            let mut statement = connection.prepare(
+                "SELECT id, skill_id, target_id, deployment_name, target_path, mode, expected_digest,
+                        expected_link_target, health, adapter_version, active, last_verified_at_ms,
+                        last_operation_id, created_at_ms, updated_at_ms FROM deployments ORDER BY id")?;
+            statement.query_map([], |row| {
+                let id = parse_text(&row.get::<_, String>(0)?, 0)?;
+                deployment_from_row_with_id_offset(id, row, 1)
+            })?.collect::<Result<Vec<_>, _>>().map_err(DbExecutorError::Sqlite)
+        }).map_err(RepositoryError::Database)
+    }
+
     pub paused: bool,
     pub maximum_depth: usize,
     pub ignore_rules: Value,
