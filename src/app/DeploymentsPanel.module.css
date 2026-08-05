@@ -1,0 +1,133 @@
+.surface {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(280px, 0.9fr);
+  gap: 12px;
+  min-height: 0;
+  height: 100%;
+}
+.browser,
+.detail {
+  min-width: 0;
+  overflow: auto;
+  border: 1px solid var(--line-subtle);
+  border-radius: 10px;
+  background: var(--surface-primary);
+}
+.detail {
+  padding-bottom: 16px;
+}
+.toolbar,
+.actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 16px;
+}
+.toolbar {
+  justify-content: space-between;
+  border-bottom: 1px solid var(--line-subtle);
+}
+.toolbar select,
+.mode button,
+.matrix button,
+.card button {
+  min-height: 32px;
+}
+.mode {
+  display: flex;
+  gap: 4px;
+}
+.mode button[aria-pressed='true'] {
+  font-weight: 700;
+  outline: 2px solid currentColor;
+}
+.check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.matrixWrap {
+  overflow: auto;
+}
+.matrix {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.matrix th,
+.matrix td {
+  padding: 8px;
+  border-bottom: 1px solid var(--line-subtle);
+  text-align: left;
+  vertical-align: middle;
+}
+.matrix td:nth-child(4) {
+  max-width: 260px;
+  overflow-wrap: anywhere;
+}
+.group th {
+  background: var(--surface-subtle, rgba(127, 127, 127, 0.08));
+}
+.matrix tr[data-selected='true'],
+.card[data-selected='true'] {
+  outline: 2px solid currentColor;
+  outline-offset: -2px;
+}
+.list {
+  padding: 0 16px 16px;
+}
+.list h3 {
+  margin: 16px 0 6px;
+  font-size: 14px;
+}
+.card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  padding: 10px;
+  border-top: 1px solid var(--line-subtle);
+}
+.card > div {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.card dl {
+  grid-column: 1 / -1;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.detailCard {
+  margin: 12px 16px;
+  overflow-wrap: anywhere;
+}
+.detailCard dl {
+  margin: 0;
+}
+.reason {
+  flex-basis: 100%;
+  margin: 2px 0 0;
+  font-size: 13px;
+}
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+@media (max-width: 760px) {
+  .surface {
+    grid-template-columns: 1fr;
+    overflow: auto;
+  }
+  .browser,
+  .detail {
+    overflow: visible;
+  }
+}

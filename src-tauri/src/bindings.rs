@@ -37,6 +37,7 @@ pub(crate) fn builder() -> Builder<tauri::Wry> {
             crate::commands::takeover::operation_execute,
             crate::commands::takeover::operation_cancel,
             crate::commands::takeover::operation_get,
+            crate::commands::takeover::operation_plan_export,
             crate::commands::takeover::skill_get,
             crate::commands::takeover::skill_preview_file,
             crate::commands::trash::trash_move_plan,

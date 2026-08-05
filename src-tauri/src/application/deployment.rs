@@ -1702,6 +1702,24 @@ impl DeploymentService {
             .map_err(|error| DeploymentError::Journal(error.to_string()))
     }
 
+    /// Returns a stable, human-readable rendering of the exact persisted Operation Plan.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the Operation ID is invalid or its durable plan cannot be validated.
+    pub fn export_plan_json(
+        &self,
+        operation_id: &str,
+    ) -> Result<(String, String), DeploymentError> {
+        let id = parse_id::<OperationId>(operation_id, "Operation")?;
+        let stored = OperationStore::open(self.vault.paths.manager())
+            .and_then(|store| store.load(id))
+            .map_err(|error| DeploymentError::Journal(error.to_string()))?;
+        let json = serde_json::to_string_pretty(&stored.plan)
+            .map_err(|error| DeploymentError::Journal(error.to_string()))?;
+        Ok((stored.plan.plan_digest.to_string(), json))
+    }
+
     /// Recovers one deployment-owned operation using only its persisted authority evidence.
     pub fn recover_operation(
         &self,
@@ -4801,6 +4819,39 @@ mod tests {
             }),
             Err(DeploymentError::CapabilityBlocked(_))
         ));
+    }
+
+    #[test]
+    fn plan_export_is_stable_pretty_json_for_the_persisted_digest() {
+        let fixture = fixture();
+        let target = target(&fixture, "export-target", FixtureTargetKindDto::Global);
+        let planned = plan(&fixture, &target, None);
+
+        let first = fixture
+            .service
+            .export_plan_json(&planned.operation_id)
+            .unwrap();
+        let second = fixture
+            .service
+            .export_plan_json(&planned.operation_id)
+            .unwrap();
+
+        assert_eq!(first, second);
+        assert_eq!(first.0, planned.plan_digest);
+        assert!(first.1.starts_with("{\n"));
+        let exported: serde_json::Value = serde_json::from_str(&first.1).unwrap();
+        assert_eq!(
+            exported
+                .get("planDigest")
+                .and_then(serde_json::Value::as_str),
+            Some(planned.plan_digest.as_str())
+        );
+        assert_eq!(
+            exported
+                .get("operationId")
+                .and_then(serde_json::Value::as_str),
+            Some(planned.operation_id.as_str())
+        );
     }
 
     #[test]

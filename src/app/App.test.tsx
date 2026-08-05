@@ -19,6 +19,7 @@ vi.mock('../lib/api', async () => {
       libraryList: vi.fn(),
       scanStart: vi.fn(),
       scanGet: vi.fn(),
+      workspaceRootsList: vi.fn(),
       targetsList: vi.fn(),
       deploymentsList: vi.fn(),
       activityList: vi.fn(),
@@ -83,6 +84,7 @@ describe('App thin slice', () => {
     vi.mocked(api.targetsList).mockReset();
     vi.mocked(api.deploymentsList).mockReset();
     vi.mocked(api.activityList).mockReset();
+    vi.mocked(api.workspaceRootsList).mockReset();
   });
 
   it('shows first-run Vault initialization before filesystem workflows', async () => {
@@ -113,6 +115,7 @@ describe('App thin slice', () => {
     vi.mocked(api.targetsList).mockResolvedValue([]);
     vi.mocked(api.deploymentsList).mockResolvedValue({ items: [], count: 0 });
     vi.mocked(api.activityList).mockResolvedValue([]);
+    vi.mocked(api.workspaceRootsList).mockResolvedValue([]);
 
     renderApp();
 
@@ -151,6 +154,8 @@ describe('App thin slice', () => {
     });
     vi.mocked(api.libraryList).mockResolvedValue(emptyLibrary);
     vi.mocked(api.targetsList).mockResolvedValue([]);
+    vi.mocked(api.deploymentsList).mockResolvedValue({ items: [], count: 0 });
+    vi.mocked(api.workspaceRootsList).mockResolvedValue([]);
 
     renderApp();
 

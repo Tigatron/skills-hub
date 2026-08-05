@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { Button } from 'react-aria-components';
 
-import type { AnyOperationView, DeploymentHealthView, FixtureTargetKindDto } from '../bindings';
+import type { AnyOperationView, DeploymentHealthView, TargetView } from '../bindings';
 import { api, type ReviewedPlan } from '../lib/api';
 import { invalidateAfterOperation, queryKeys } from '../lib/query';
 import {
@@ -12,77 +12,61 @@ import {
   MetaRow,
   PanelHeader,
   PathText,
-  PrimaryButton,
   SecondaryButton,
   StatusPill,
 } from './components';
 import { OperationPanel } from './OperationPanel';
-import styles from './thin.module.css';
+import styles from './DeploymentsPanel.module.css';
+
+type GroupBy = 'agent' | 'project' | 'skill';
+type DisplayMode = 'matrix' | 'list';
+type DeploymentGroup = { id: string; label: string; items: DeploymentHealthView[] };
 
 export function DeploymentsPanel() {
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [includeInactive, setIncludeInactive] = useState(false);
-  const [fixtureKind, setFixtureKind] = useState<FixtureTargetKindDto>('global');
-  const [fixturePath, setFixturePath] = useState('');
+  const [groupBy, setGroupBy] = useState<GroupBy>('agent');
+  const [displayMode, setDisplayMode] = useState<DisplayMode>('matrix');
   const [plan, setPlan] = useState<ReviewedPlan | null>(null);
   const [operation, setOperation] = useState<AnyOperationView | null>(null);
 
   const deployments = useQuery({
     queryKey: queryKeys.deployments({ skillId: null, includeInactive }),
     queryFn: () =>
-      api.deploymentsList({
-        skillId: null,
-        targetId: null,
-        includeInactive,
-        limit: 100,
-      }),
+      api.deploymentsList({ skillId: null, targetId: null, includeInactive, limit: 100 }),
   });
-
-  const targets = useQuery({
-    queryKey: queryKeys.targets,
-    queryFn: () => api.targetsList(),
-  });
-
-  const selected = useMemo(
-    () => deployments.data?.items.find((item) => item.deploymentId === selectedId) ?? null,
-    [deployments.data, selectedId],
+  const targets = useQuery({ queryKey: queryKeys.targets, queryFn: () => api.targetsList() });
+  const selected = deployments.data?.items.find((item) => item.deploymentId === selectedId) ?? null;
+  const groups = useMemo(
+    () => groupDeployments(deployments.data?.items ?? [], targets.data ?? [], groupBy),
+    [deployments.data, targets.data, groupBy],
   );
-
-  const registerTarget = useMutation({
-    mutationFn: () =>
-      api.targetRegisterFixture({
-        kind: fixtureKind,
-        selectedDirectory: fixturePath.trim(),
-        adapterId: 'universal-agent-skills',
-        isOverride: false,
-      }),
-    onSuccess: async () => {
-      setFixturePath('');
-      await queryClient.invalidateQueries({ queryKey: queryKeys.targets });
-    },
-  });
 
   const verify = useMutation({
     mutationFn: async () => {
-      if (!selected) {
-        throw new Error('Select a deployment first.');
-      }
+      if (!selected) throw new Error('Select a deployment first.');
       return api.deploymentVerify(selected.deploymentId);
     },
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['deployments'] });
-    },
+    onSuccess: async () => queryClient.invalidateQueries({ queryKey: ['deployments'] }),
   });
-
   const planUndeploy = useMutation({
     mutationFn: async (resolution: 'remove_managed' | 'preserve_target') => {
-      if (!selected) {
-        throw new Error('Select a deployment first.');
-      }
-      return api.undeployPlan({
-        deploymentId: selected.deploymentId,
-        resolution,
+      if (!selected) throw new Error('Select a deployment first.');
+      return api.undeployPlan({ deploymentId: selected.deploymentId, resolution });
+    },
+    onSuccess: (reviewed) => {
+      setPlan({ kind: 'deployment', plan: reviewed });
+      setOperation(null);
+    },
+  });
+  const planRedeploy = useMutation({
+    mutationFn: async () => {
+      if (!selected) throw new Error('Select a deployment first.');
+      return api.deploymentPlan({
+        skillId: selected.skillId,
+        targetId: selected.targetId,
+        requestedMode: selected.mode,
       });
     },
     onSuccess: (reviewed) => {
@@ -90,12 +74,9 @@ export function DeploymentsPanel() {
       setOperation(null);
     },
   });
-
   const execute = useMutation({
     mutationFn: async () => {
-      if (!plan) {
-        throw new Error('No plan to execute.');
-      }
+      if (!plan) throw new Error('No plan to execute.');
       return api.operationExecute({
         operationId: plan.plan.operationId,
         planDigest: plan.plan.planDigest,
@@ -106,202 +87,307 @@ export function DeploymentsPanel() {
       await invalidateAfterOperation(queryClient);
     },
   });
-
   const cancel = useMutation({
     mutationFn: async () => {
       const operationId = operation?.value.operationId ?? plan?.plan.operationId;
-      if (!operationId) {
-        throw new Error('No operation to cancel.');
-      }
+      if (!operationId) throw new Error('No operation to cancel.');
       return api.operationCancel({ operationId });
     },
   });
-
   const busy =
-    registerTarget.isPending ||
     verify.isPending ||
     planUndeploy.isPending ||
+    planRedeploy.isPending ||
     execute.isPending ||
     cancel.isPending;
 
   return (
-    <div className={styles.split}>
-      <section className={styles.panel} aria-label="Deployments">
+    <div className={styles.surface}>
+      <section className={styles.browser} aria-label="Deployments">
         <PanelHeader
           title="Deployments"
-          description="Rust-owned health, drift direction, and allowed actions."
+          description="Backend-reported health, drift, and available actions."
           actions={
-            <label className={styles.inlineFields}>
+            <label className={styles.check}>
               <input
                 type="checkbox"
                 checked={includeInactive}
                 onChange={(event) => setIncludeInactive(event.target.checked)}
               />
-              <span>Include inactive</span>
+              Include inactive
             </label>
           }
         />
-        <div className={styles.panelBody}>
-          {deployments.isError ? (
-            <ErrorBanner error={deployments.error} onRetry={() => void deployments.refetch()} />
-          ) : null}
-          {deployments.isPending ? <LoadingBlock label="Loading deployments" /> : null}
-          {deployments.data && deployments.data.items.length === 0 ? (
-            <EmptyState
-              title="No deployments yet"
-              body="Deploy a Vaulted Skill from Library after reviewing a plan."
-            />
-          ) : null}
-          <div className={styles.list} role="listbox" aria-label="Deployment rows">
-            {deployments.data?.items.map((item) => (
-              <Button
-                key={item.deploymentId}
-                className={styles.listItem!}
-                onPress={() => setSelectedId(item.deploymentId)}
-                data-selected={selectedId === item.deploymentId}
-              >
-                <div className={styles.listItemTitle}>
-                  <span>{item.deploymentName}</span>
-                  <StatusPill tone={healthTone(item.health)}>{item.health}</StatusPill>
-                </div>
-                <div className={styles.listItemMeta}>
-                  {item.mode} · {item.driftDirection} · {item.targetPath}
-                </div>
-              </Button>
-            ))}
+        <div className={styles.toolbar} aria-label="Deployment view controls">
+          <label>
+            Group by{' '}
+            <select value={groupBy} onChange={(event) => setGroupBy(event.target.value as GroupBy)}>
+              <option value="agent">Agent</option>
+              <option value="project">Project</option>
+              <option value="skill">Skill</option>
+            </select>
+          </label>
+          <div className={styles.mode} aria-label="Display mode">
+            <Button
+              onPress={() => setDisplayMode('matrix')}
+              aria-pressed={displayMode === 'matrix'}
+            >
+              Matrix
+            </Button>
+            <Button onPress={() => setDisplayMode('list')} aria-pressed={displayMode === 'list'}>
+              List
+            </Button>
           </div>
         </div>
-      </section>
-
-      <section className={styles.panel} aria-label="Deployment detail">
-        <PanelHeader
-          title="Target & undeploy"
-          description="Fixture targets exist for thin-slice testing."
-        />
-        <div className={styles.panelBody}>
-          <div className={styles.planBox}>
-            <h3>Register fixture target</h3>
-            <div className={styles.inlineFields}>
-              <select
-                className={styles.selectInput}
-                value={fixtureKind}
-                onChange={(event) => setFixtureKind(event.target.value as FixtureTargetKindDto)}
-                aria-label="Fixture target kind"
-              >
-                <option value="global">Global</option>
-                <option value="git_project">Git project</option>
-                <option value="personal_project">Personal project</option>
-              </select>
-              <input
-                className={styles.textInput}
-                style={{ minWidth: 220 }}
-                value={fixturePath}
-                onChange={(event) => setFixturePath(event.target.value)}
-                placeholder="/absolute/target/root"
-                aria-label="Fixture target directory"
-              />
-              <PrimaryButton
-                onPress={() => registerTarget.mutate()}
-                isDisabled={busy || !fixturePath.trim()}
-              >
-                Register
-              </PrimaryButton>
-            </div>
-            {registerTarget.isError ? <ErrorBanner error={registerTarget.error} /> : null}
-            {targets.data && targets.data.length > 0 ? (
-              <ul>
-                {targets.data.map((target) => (
-                  <li key={target.targetId}>
-                    {target.scope} · default {target.defaultMode} · {target.rootPath}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className={styles.muted}>No targets registered in this Vault yet.</p>
-            )}
-          </div>
-
-          {selected ? (
-            <DeploymentDetail item={selected} />
-          ) : (
-            <EmptyState
-              title="Select a deployment"
-              body="Verify and undeploy actions stay plan-gated."
-            />
-          )}
-
-          <div className={styles.panelActions}>
-            <SecondaryButton onPress={() => verify.mutate()} isDisabled={!selected || busy}>
-              Verify selected
-            </SecondaryButton>
-            <SecondaryButton
-              onPress={() => planUndeploy.mutate('remove_managed')}
-              isDisabled={!selected || busy}
-            >
-              Plan clean undeploy
-            </SecondaryButton>
-            <SecondaryButton
-              onPress={() => planUndeploy.mutate('preserve_target')}
-              isDisabled={!selected || busy}
-            >
-              Plan preserve undeploy
-            </SecondaryButton>
-          </div>
-
-          {verify.isError ? <ErrorBanner error={verify.error} /> : null}
-          {planUndeploy.isError ? <ErrorBanner error={planUndeploy.error} /> : null}
-          {execute.isError ? <ErrorBanner error={execute.error} /> : null}
-
-          <OperationPanel
-            plan={plan}
-            operation={operation}
-            busy={busy}
-            onExecute={() => execute.mutate()}
-            onCancel={() => cancel.mutate()}
-            onClear={() => {
-              setPlan(null);
-              setOperation(null);
-            }}
+        {deployments.isError ? (
+          <ErrorBanner error={deployments.error} onRetry={() => void deployments.refetch()} />
+        ) : null}
+        {targets.isError ? (
+          <ErrorBanner error={targets.error} onRetry={() => void targets.refetch()} />
+        ) : null}
+        {deployments.isPending || targets.isPending ? (
+          <LoadingBlock label="Loading deployments" />
+        ) : null}
+        {deployments.data?.items.length === 0 ? (
+          <EmptyState
+            title="No deployments yet"
+            body="Deploy a Vaulted Skill from Library after reviewing a plan."
           />
-        </div>
+        ) : null}
+        {displayMode === 'matrix' ? (
+          <DeploymentMatrix groups={groups} selectedId={selectedId} onSelect={setSelectedId} />
+        ) : (
+          <DeploymentList groups={groups} selectedId={selectedId} onSelect={setSelectedId} />
+        )}
       </section>
+
+      <section className={styles.detail} aria-label="Deployment detail">
+        <PanelHeader
+          title="Deployment detail"
+          description="Undeploy always starts with a reviewed plan."
+        />
+        {selected ? (
+          <DeploymentDetail item={selected} />
+        ) : (
+          <EmptyState
+            title="Select a deployment"
+            body="Choose a row to inspect backend evidence and actions."
+          />
+        )}
+        <ActionBar
+          item={selected}
+          busy={busy}
+          onVerify={() => verify.mutate()}
+          onRedeploy={() => planRedeploy.mutate()}
+          onUndeploy={(resolution) => planUndeploy.mutate(resolution)}
+        />
+        {verify.isError ? <ErrorBanner error={verify.error} /> : null}
+        {planUndeploy.isError ? <ErrorBanner error={planUndeploy.error} /> : null}
+        {planRedeploy.isError ? <ErrorBanner error={planRedeploy.error} /> : null}
+        {execute.isError ? <ErrorBanner error={execute.error} /> : null}
+        <OperationPanel
+          plan={plan}
+          operation={operation}
+          busy={busy}
+          onExecute={() => execute.mutate()}
+          onCancel={() => cancel.mutate()}
+          onClear={() => {
+            setPlan(null);
+            setOperation(null);
+          }}
+        />
+      </section>
+    </div>
+  );
+}
+
+function DeploymentMatrix({ groups, selectedId, onSelect }: ViewProps) {
+  return (
+    <div className={styles.matrixWrap}>
+      <table className={styles.matrix} aria-label="Deployment matrix">
+        <thead>
+          <tr>
+            <th scope="col">Group / deployment</th>
+            <th scope="col">Health</th>
+            <th scope="col">Drift</th>
+            <th scope="col">Target path</th>
+            <th scope="col">Action</th>
+          </tr>
+        </thead>
+        {groups.map((group) => (
+          <tbody key={group.id}>
+            <tr className={styles.group}>
+              <th scope="rowgroup" colSpan={5}>
+                {group.label}
+              </th>
+            </tr>
+            {group.items.map((item) => (
+              <tr key={item.deploymentId} data-selected={selectedId === item.deploymentId}>
+                <th scope="row">{item.deploymentName}</th>
+                <td>
+                  <Health item={item} />
+                </td>
+                <td>{item.driftDirection}</td>
+                <td>
+                  <PathText path={item.targetPath} />
+                </td>
+                <td>
+                  <Button
+                    onPress={() => onSelect(item.deploymentId)}
+                    aria-label={`Select ${item.deploymentName}`}
+                  >
+                    Select
+                  </Button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        ))}
+      </table>
+    </div>
+  );
+}
+
+function DeploymentList({ groups, selectedId, onSelect }: ViewProps) {
+  return (
+    <div className={styles.list} aria-label="Deployment list">
+      {groups.map((group) => (
+        <section key={group.id}>
+          <h3>{group.label}</h3>
+          {group.items.map((item) => (
+            <article
+              key={item.deploymentId}
+              data-selected={selectedId === item.deploymentId}
+              className={styles.card}
+            >
+              <div>
+                <strong>{item.deploymentName}</strong>
+                <Health item={item} />
+              </div>
+              <dl>
+                <MetaRow label="Drift" value={item.driftDirection} />
+                <MetaRow label="Target path" value={<PathText path={item.targetPath} />} />
+              </dl>
+              <Button
+                onPress={() => onSelect(item.deploymentId)}
+                aria-label={`Select ${item.deploymentName}`}
+              >
+                Select
+              </Button>
+            </article>
+          ))}
+        </section>
+      ))}
+    </div>
+  );
+}
+
+type ViewProps = {
+  groups: DeploymentGroup[];
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+};
+
+function Health({ item }: { item: DeploymentHealthView }) {
+  return (
+    <StatusPill tone="neutral">
+      <span className={styles.srOnly}>Health: </span>
+      {item.health}
+    </StatusPill>
+  );
+}
+
+function ActionBar({
+  item,
+  busy,
+  onVerify,
+  onRedeploy,
+  onUndeploy,
+}: {
+  item: DeploymentHealthView | null;
+  busy: boolean;
+  onVerify: () => void;
+  onRedeploy: () => void;
+  onUndeploy: (resolution: 'remove_managed' | 'preserve_target') => void;
+}) {
+  const canVerify = Boolean(item?.allowedActions.includes('verify'));
+  const canRedeploy = Boolean(item?.allowedActions.includes('redeploy'));
+  const canClean = Boolean(item?.allowedActions.includes('undeploy'));
+  const canPreserve = Boolean(item?.allowedActions.includes('undeploy_preserve'));
+  return (
+    <div className={styles.actions}>
+      <SecondaryButton onPress={onVerify} isDisabled={!canVerify || busy}>
+        Verify selected
+      </SecondaryButton>
+      <SecondaryButton onPress={onRedeploy} isDisabled={!canRedeploy || busy}>
+        Plan redeploy
+      </SecondaryButton>
+      <SecondaryButton onPress={() => onUndeploy('remove_managed')} isDisabled={!canClean || busy}>
+        Plan clean undeploy
+      </SecondaryButton>
+      <SecondaryButton
+        onPress={() => onUndeploy('preserve_target')}
+        isDisabled={!canPreserve || busy}
+      >
+        Plan preserve undeploy
+      </SecondaryButton>
+      {item?.disabledReason ? (
+        <p className={styles.reason} role="note">
+          Backend note: {item.disabledReason}
+        </p>
+      ) : null}
     </div>
   );
 }
 
 function DeploymentDetail({ item }: { item: DeploymentHealthView }) {
   return (
-    <div className={styles.detailCard} style={{ padding: 0 }}>
+    <div className={styles.detailCard}>
       <h3>{item.deploymentName}</h3>
-      <dl className={styles.metaList}>
-        <MetaRow
-          label="Health"
-          value={<StatusPill tone={healthTone(item.health)}>{item.health}</StatusPill>}
-        />
+      <dl>
+        <MetaRow label="Health" value={<Health item={item} />} />
         <MetaRow label="Explanation" value={item.explanation} />
         <MetaRow label="Path" value={<PathText path={item.targetPath} />} />
         <MetaRow label="Mode" value={item.mode} />
-        <MetaRow label="Drift" value={item.driftDirection} />
+        <MetaRow label="Drift direction" value={item.driftDirection} />
         <MetaRow label="Expected digest" value={item.expectedDigest} />
         <MetaRow label="Vault digest" value={item.vaultDigest ?? '—'} />
         <MetaRow label="Target digest" value={item.targetDigest ?? '—'} />
-        <MetaRow label="Allowed" value={item.allowedActions.join(', ') || 'None'} />
-        <MetaRow label="Disabled" value={item.disabledReason ?? '—'} />
+        <MetaRow
+          label="Allowed actions"
+          value={item.allowedActions.join(', ') || 'None reported'}
+        />
       </dl>
     </div>
   );
 }
 
-function healthTone(health: string): 'neutral' | 'success' | 'pending' | 'danger' {
-  const value = health.toLowerCase();
-  if (value.includes('clean') || value.includes('ok')) {
-    return 'success';
+function groupDeployments(
+  items: DeploymentHealthView[],
+  targets: TargetView[],
+  by: GroupBy,
+): DeploymentGroup[] {
+  const targetById = new Map(targets.map((target) => [target.targetId, target]));
+  const groups = new Map<string, DeploymentGroup>();
+  for (const item of items) {
+    const target = targetById.get(item.targetId);
+    let id = item.targetId;
+    let label = target
+      ? `${target.adapterId} — ${target.rootPath}`
+      : `Agent target ${item.targetId}`;
+    if (by === 'skill') {
+      id = item.skillId;
+      label = `Skill ${item.skillId}`;
+    }
+    if (by === 'project') {
+      id = target?.projectId ?? 'global';
+      label = target?.projectId
+        ? `${target.projectKind ?? 'Project'} — ${target.projectId}`
+        : 'Global';
+    }
+    const group = groups.get(id) ?? { id, label, items: [] };
+    group.items.push(item);
+    groups.set(id, group);
   }
-  if (value.includes('missing') || value.includes('broken') || value.includes('conflict')) {
-    return 'danger';
-  }
-  if (value.includes('ahead') || value.includes('modified') || value.includes('drift')) {
-    return 'pending';
-  }
-  return 'neutral';
+  return [...groups.values()];
 }

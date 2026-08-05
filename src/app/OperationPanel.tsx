@@ -1,7 +1,15 @@
+import { useMutation } from '@tanstack/react-query';
+
 import type { AnyOperationView } from '../bindings';
-import { isTerminalOperationState, operationOutcomeLabel, type ReviewedPlan } from '../lib/api';
+import {
+  api,
+  isTerminalOperationState,
+  operationOutcomeLabel,
+  type ReviewedPlan,
+} from '../lib/api';
 import {
   DangerButton,
+  ErrorBanner,
   MetaRow,
   PathText,
   PrimaryButton,
@@ -25,6 +33,10 @@ export function OperationPanel({
   onCancel: () => void;
   onClear: () => void;
 }) {
+  const exportPlan = useMutation({
+    mutationFn: (operationId: string) => api.operationPlanExport({ operationId }),
+  });
+
   if (!plan && !operation) {
     return (
       <div className={styles.emptyState}>
@@ -39,6 +51,12 @@ export function OperationPanel({
 
   const tone = operationTone(operation);
   const terminal = operation ? isTerminalOperationState(operation.value.state) : false;
+  const currentExport =
+    plan &&
+    exportPlan.data?.operationId === plan.plan.operationId &&
+    exportPlan.data.planDigest === plan.plan.planDigest
+      ? exportPlan.data
+      : null;
 
   return (
     <div className={styles.stack}>
@@ -65,9 +83,34 @@ export function OperationPanel({
 
       {plan ? <PlanReview plan={plan} /> : null}
 
+      {currentExport ? (
+        <div className={styles.planBox}>
+          <h3>Exported Operation Plan</h3>
+          <p className={styles.muted}>Exact persisted plan · digest {currentExport.planDigest}</p>
+          <pre className={styles.planJson}>{currentExport.json}</pre>
+          <SecondaryButton onPress={() => downloadPlan(currentExport)}>
+            Download JSON
+          </SecondaryButton>
+        </div>
+      ) : null}
+      {exportPlan.isError ? <ErrorBanner error={exportPlan.error} /> : null}
+
       <div className={styles.panelActions}>
+        {plan ? (
+          <SecondaryButton
+            onPress={() => exportPlan.mutate(plan.plan.operationId)}
+            isDisabled={busy || exportPlan.isPending}
+          >
+            {exportPlan.isPending ? 'Exporting…' : 'Export plan JSON'}
+          </SecondaryButton>
+        ) : null}
         {plan && !terminal ? (
-          <PrimaryButton onPress={onExecute} isDisabled={busy || !executionAllowed(plan)}>
+          <PrimaryButton
+            onPress={onExecute}
+            isDisabled={
+              busy || !executionAllowed(plan) || (plan.kind === 'trash' && !currentExport)
+            }
+          >
             {busy ? 'Running…' : 'Execute reviewed plan'}
           </PrimaryButton>
         ) : null}
@@ -82,6 +125,15 @@ export function OperationPanel({
       </div>
     </div>
   );
+}
+
+function downloadPlan(view: { operationId: string; json: string }) {
+  const url = URL.createObjectURL(new Blob([view.json], { type: 'application/json' }));
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = `skills-hub-operation-${view.operationId}.json`;
+  anchor.click();
+  URL.revokeObjectURL(url);
 }
 
 function PlanReview({ plan }: { plan: ReviewedPlan }) {

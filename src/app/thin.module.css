@@ -503,6 +503,21 @@
   line-height: 1.5;
 }
 
+.planJson {
+  max-height: 240px;
+  margin: 0;
+  padding: 10px;
+  overflow: auto;
+  border: 1px solid var(--line-subtle);
+  border-radius: 6px;
+  background: var(--surface-primary);
+  color: var(--ink-soft);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  line-height: 1.45;
+  white-space: pre;
+}
+
 .stack {
   display: grid;
   gap: var(--space-3);

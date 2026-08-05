@@ -1,10 +1,10 @@
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { Button } from 'react-aria-components';
 
 import { api } from '../lib/api';
 import type { ReviewedPlan } from '../lib/api';
-import { queryKeys } from '../lib/query';
+import { invalidateAfterOperation, queryKeys } from '../lib/query';
 import {
   EmptyState,
   ErrorBanner,
@@ -19,6 +19,7 @@ import { OperationPanel } from './OperationPanel';
 import styles from './thin.module.css';
 
 export function ActivityPanel() {
+  const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [kind, setKind] = useState('');
   const [outcome, setOutcome] = useState('');
@@ -77,7 +78,10 @@ export function ActivityPanel() {
         planDigest: undoPlan.plan.planDigest,
       });
     },
-    onSuccess: setUndoOperation,
+    onSuccess: (view) => {
+      setUndoOperation(view);
+      invalidateAfterOperation(queryClient);
+    },
   });
 
   return (

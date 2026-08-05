@@ -254,6 +254,17 @@ async operationGet(request: OperationIdRequest) : Promise<Result<AnyOperationVie
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Exports the validated persisted plan without authorizing or executing it.
+ */
+async operationPlanExport(request: OperationIdRequest) : Promise<Result<PlanExportView, AppErrorView>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("operation_plan_export", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async skillGet(request: SkillIdRequest) : Promise<Result<SkillDetail, AppErrorView>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("skill_get", { request }) };
@@ -633,6 +644,7 @@ export type OperationIdRequest = { operationId: string }
 export type OperationUndoPlanView = { status: "available"; plan: BatchDeploymentPlanView } | { status: "conflict"; detail: string; choices: string[] } | { status: "unavailable"; detail: string }
 export type OperationView = { operationId: string; planDigest: string; state: string; outcome: string | null; failure: string | null; recovery: string[]; context: TakeoverOperationContextView; review: TakeoverPlanView; replayed: boolean }
 export type PermanentDeleteRequest = { entryId: string; confirmation: string }
+export type PlanExportView = { operationId: string; planDigest: string; json: string }
 export type PlatformSummary = { os: string; arch: string; minimumSupportedOs: string }
 export type ReconcileResult = { skillId: string; workingPath: string; previousDigest: string; workingDigest: string; changed: boolean; deploymentsMarkedVaultAhead: number }
 export type RegisterTargetRequest = { kind: FixtureTargetKindDto; selectedDirectory: string; adapterId: string | null; isOverride: boolean | null }

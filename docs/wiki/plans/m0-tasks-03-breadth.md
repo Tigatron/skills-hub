@@ -4,19 +4,49 @@ title: M0 Tasks 010–014 — Product Breadth
 description: Executable tasks for Workspace discovery, watchers, all six adapters, custom targets, Vault lifecycle, Trash/undo, and the complete M0 UI.
 status: planned
 tags: [skills-hub, m0, tasks, breadth]
-requirements: [VLT-05, VLT-06, VLT-07, VLT-08, SCN-01, SCN-02, SCN-04, SCN-05, SCN-06, SCN-07, SCN-08, SCN-09, IMP-01, IMP-02, IMP-07, DPL-01, DPL-02, DPL-03, DPL-04, DPL-09, DPL-10, DPL-12, DEL-01, DEL-02, DEL-03, DEL-04, DEL-05, DEL-06]
+requirements:
+  [
+    VLT-05,
+    VLT-06,
+    VLT-07,
+    VLT-08,
+    SCN-01,
+    SCN-02,
+    SCN-04,
+    SCN-05,
+    SCN-06,
+    SCN-07,
+    SCN-08,
+    SCN-09,
+    IMP-01,
+    IMP-02,
+    IMP-07,
+    DPL-01,
+    DPL-02,
+    DPL-03,
+    DPL-04,
+    DPL-09,
+    DPL-10,
+    DPL-12,
+    DEL-01,
+    DEL-02,
+    DEL-03,
+    DEL-04,
+    DEL-05,
+    DEL-06,
+  ]
 timestamp: 2026-07-23T00:00:00Z
 ---
 
 # M0-010 — Implement Workspace Roots, project discovery, and watcher reconciliation
 
-| Field | Value |
-| --- | --- |
-| Status | Complete (2026-08-05) |
-| Dependencies | M0-004 |
-| PRD coverage | SCN-04/05/06/07/08/09; watcher foundation later reused for VLT-05 |
-| Design | [Scanning and reconciliation](../workflows/scanning-and-reconciliation.md), [Target adapters](../interfaces/target-adapters.md), [Filesystem safety](../security/filesystem-safety.md), [Tauri/UI contract](../interfaces/tauri-and-ui-state.md) |
-| Parallelization | Workspace traversal/discovery and the watcher coordinator can proceed in parallel after the scan-boundary and coverage-record contracts freeze. Runs in parallel with M0-011 and most of M0-012. |
+| Field           | Value                                                                                                                                                                                                                                            |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Status          | Complete (2026-08-05)                                                                                                                                                                                                                            |
+| Dependencies    | M0-004                                                                                                                                                                                                                                           |
+| PRD coverage    | SCN-04/05/06/07/08/09; watcher foundation later reused for VLT-05                                                                                                                                                                                |
+| Design          | [Scanning and reconciliation](../workflows/scanning-and-reconciliation.md), [Target adapters](../interfaces/target-adapters.md), [Filesystem safety](../security/filesystem-safety.md), [Tauri/UI contract](../interfaces/tauri-and-ui-state.md) |
+| Parallelization | Workspace traversal/discovery and the watcher coordinator can proceed in parallel after the scan-boundary and coverage-record contracts freeze. Runs in parallel with M0-011 and most of M0-012.                                                 |
 
 ## Deliverables
 
@@ -65,13 +95,13 @@ Implemented on 2026-08-05 as a read-only Rust-owned Workspace scanner and reconc
 
 # M0-011 — Verify and ship all six adapters and custom targets
 
-| Field | Value |
-| --- | --- |
-| Status | Complete (2026-08-05) |
-| Dependencies | M0-004, M0-007 |
-| PRD coverage | SCN-01/02, DPL-01/02/03/04/09 |
-| Design | [Target adapters](../interfaces/target-adapters.md), [Scanning and reconciliation](../workflows/scanning-and-reconciliation.md), [Takeover and deployment](../workflows/takeover-and-deployment.md) |
-| Parallelization | Per-adapter verification and fixtures are independent and can be distributed. Custom-target work is a separate strand. Runs in parallel with M0-010 and most of M0-012. |
+| Field           | Value                                                                                                                                                                                               |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Status          | Complete (2026-08-05)                                                                                                                                                                               |
+| Dependencies    | M0-004, M0-007                                                                                                                                                                                      |
+| PRD coverage    | SCN-01/02, DPL-01/02/03/04/09                                                                                                                                                                       |
+| Design          | [Target adapters](../interfaces/target-adapters.md), [Scanning and reconciliation](../workflows/scanning-and-reconciliation.md), [Takeover and deployment](../workflows/takeover-and-deployment.md) |
+| Parallelization | Per-adapter verification and fixtures are independent and can be distributed. Custom-target work is a separate strand. Runs in parallel with M0-010 and most of M0-012.                             |
 
 ## Deliverables
 
@@ -117,13 +147,13 @@ Completed on 2026-08-05 through the existing generic scanner and Operation kerne
 
 # M0-012 — Implement Vault lifecycle: watch, verify, repair, relocate, rebuild, and GC
 
-| Field | Value |
-| --- | --- |
-| Status | Complete (2026-08-05) |
-| Dependencies | M0-003, M0-008 |
-| PRD coverage | VLT-05/06/07/08 |
-| Design | [Vault and SQLite](../storage/vault-and-sqlite.md), [Bundle objects and retention](../storage/bundle-hashing-and-objects.md), [Operation model](../domain/operation-recovery-and-trash.md), [Transaction execution](../workflows/transaction-execution.md) |
-| Parallelization | Verify/rebuild, relocate, and GC are separable strands. The Vault working-root watcher registers through the coordinator introduced in M0-010; coordinate on the shared scan-boundary contract or land that piece after M0-010 merges. |
+| Field           | Value                                                                                                                                                                                                                                                      |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Status          | Complete (2026-08-05)                                                                                                                                                                                                                                      |
+| Dependencies    | M0-003, M0-008                                                                                                                                                                                                                                             |
+| PRD coverage    | VLT-05/06/07/08                                                                                                                                                                                                                                            |
+| Design          | [Vault and SQLite](../storage/vault-and-sqlite.md), [Bundle objects and retention](../storage/bundle-hashing-and-objects.md), [Operation model](../domain/operation-recovery-and-trash.md), [Transaction execution](../workflows/transaction-execution.md) |
+| Parallelization | Verify/rebuild, relocate, and GC are separable strands. The Vault working-root watcher registers through the coordinator introduced in M0-010; coordinate on the shared scan-boundary contract or land that piece after M0-010 merges.                     |
 
 ## Deliverables
 
@@ -173,13 +203,13 @@ Implemented on 2026-08-05 in the Rust lifecycle service and typed command bounda
 
 # M0-013 — Implement Trash, restore, permanent delete, and operation undo
 
-| Field | Value |
-| --- | --- |
-| Status | Complete (2026-08-05) |
-| Dependencies | M0-008, M0-012 |
-| PRD coverage | DEL-01/02/03/04/05/06, IMP-07 |
-| Design | [Operation model](../domain/operation-recovery-and-trash.md), [Transaction execution](../workflows/transaction-execution.md), [Filesystem safety](../security/filesystem-safety.md), [Identity and state](../domain/identity-and-state.md) |
-| Parallelization | Trash/restore/delete and the undo surface are separable after the Trash entry layout and lifecycle transitions freeze. |
+| Field           | Value                                                                                                                                                                                                                                      |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Status          | Complete (2026-08-05)                                                                                                                                                                                                                      |
+| Dependencies    | M0-008, M0-012                                                                                                                                                                                                                             |
+| PRD coverage    | DEL-01/02/03/04/05/06, IMP-07                                                                                                                                                                                                              |
+| Design          | [Operation model](../domain/operation-recovery-and-trash.md), [Transaction execution](../workflows/transaction-execution.md), [Filesystem safety](../security/filesystem-safety.md), [Identity and state](../domain/identity-and-state.md) |
+| Parallelization | Trash/restore/delete and the undo surface are separable after the Trash entry layout and lifecycle transitions freeze.                                                                                                                     |
 
 ## Deliverables
 
@@ -228,12 +258,12 @@ Completed on 2026-08-05 with schema-v5 internal-Vault Operations for move, resto
 
 # M0-014 — Complete the M0 UI surfaces
 
-| Field | Value |
-| --- | --- |
-| Status | Planned |
-| Dependencies | M0-009, M0-010, M0-011, M0-012, M0-013 |
-| PRD coverage | SCN-05/09, IMP-01/02, DPL-10/12, DEL-01/02/03/04/05, VLT-06; PRD §9 information architecture and §12 UX brief |
-| Design | [Tauri/UI contract](../interfaces/tauri-and-ui-state.md), [System context](../architecture/system-context.md), [Testing and acceptance](../quality/testing-and-acceptance.md) |
+| Field           | Value                                                                                                                                                                                                             |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Status          | Complete (2026-08-05)                                                                                                                                                                                             |
+| Dependencies    | M0-009, M0-010, M0-011, M0-012, M0-013                                                                                                                                                                            |
+| PRD coverage    | SCN-05/09, IMP-01/02, DPL-10/12, DEL-01/02/03/04/05, VLT-06; PRD §9 information architecture and §12 UX brief                                                                                                     |
+| Design          | [Tauri/UI contract](../interfaces/tauri-and-ui-state.md), [System context](../architecture/system-context.md), [Testing and acceptance](../quality/testing-and-acceptance.md)                                     |
 | Parallelization | Surfaces (Library, Deployments, detail, Activity, Settings, Trash) can be distributed by feature after read models and interaction vocabulary freeze; completion requires real backend integration, not fixtures. |
 
 ## Deliverables
@@ -274,6 +304,14 @@ The UI renders Rust-provided read models and capabilities only; it computes no o
 - Matrix and list-fallback keyboard/focus tests.
 - Plan-export snapshot test against a fixture Operation.
 - Long-path and reference-scale rendering tests.
+
+## Implementation evidence
+
+- The shell now exposes Library, Deployments, Activity, Trash, and Settings without M1 Discover or Collections routes. A locally persistent setup checklist derives progress from Rust read models rather than optimistic UI state.
+- Library renders bounded 100-row pages with duplicate/conflict summaries, long-path-safe observation detail, Keep external/takeover/deploy plans, Vault provenance/conflicts, and contained file preview. Deployments offers Agent, Project, and Skill groupings through keyboard-operable matrix and list views over the same query result and capability-gated verify/undeploy actions.
+- Settings integrates real Workspace Root and manual-project lifecycle commands with complete/incomplete/stale coverage evidence; adapter enablement and override drafts; custom targets; Vault verify plus reviewed repair, rebuild, relocation, and two-phase object-GC entry points; and Trash retention. Trash has separate restore and exact-name guarded permanent-delete review/execute flows with no optimistic removal.
+- `operation_plan_export` validates the exact persisted Operation Plan and returns stable human-readable JSON without authorization or execution. The renderer downloads those backend bytes rather than rebuilding a plan in TypeScript.
+- Surface suites cover empty, incomplete, long-path, blocked, recovery-plan, matrix/list keyboard, Trash guard, post-success invalidation, and plan-export snapshot behavior. The completion gate passed with 25 frontend tests; 239 Rust library tests plus bindings/harness tests (3 intentional crash-helper ignores); strict Clippy; generated-binding drift; TypeScript, ESLint, docs, formatting, and renderer production build checks.
 
 ## Risks and recovery
 

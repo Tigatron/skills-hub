@@ -1,0 +1,49 @@
+.checklist,
+.collapsed {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: 8px var(--space-5);
+  border-bottom: 1px solid var(--line-subtle);
+  background: var(--surface-canvas);
+  color: var(--ink-soft);
+  font-size: 11px;
+}
+
+.checklist > div {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.checklist strong {
+  color: var(--ink-strong);
+  white-space: nowrap;
+}
+
+.checklist ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.checklist li {
+  display: inline-flex;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.checklist li[data-complete='true'] {
+  color: var(--state-success);
+}
+
+.collapsed {
+  justify-content: flex-end;
+  padding-block: 6px;
+  color: var(--ink-muted);
+}

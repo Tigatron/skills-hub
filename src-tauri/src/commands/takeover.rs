@@ -1,5 +1,7 @@
 //! Typed takeover, Operation, and Skill-detail IPC use cases.
 
+use serde::Serialize;
+use specta::Type;
 use tauri::State;
 
 use crate::{
@@ -13,6 +15,14 @@ use crate::{
     operations::OperationKind,
     runtime::AppRuntime,
 };
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanExportView {
+    pub operation_id: String,
+    pub plan_digest: String,
+    pub json: String,
+}
 
 #[tauri::command]
 #[specta::specta]
@@ -128,6 +138,28 @@ pub async fn operation_get(
             },
         )
         .await?
+}
+
+/// Exports the validated persisted plan without authorizing or executing it.
+#[tauri::command]
+#[specta::specta]
+pub async fn operation_plan_export(
+    runtime: State<'_, AppRuntime>,
+    request: OperationIdRequest,
+) -> Result<PlanExportView, AppErrorView> {
+    let service = runtime.deployment_service()?;
+    let operation_id = request.operation_id;
+    runtime
+        .run_blocking(move || {
+            let (plan_digest, json) = service.export_plan_json(&operation_id)?;
+            Ok::<PlanExportView, crate::application::deployment::DeploymentError>(PlanExportView {
+                operation_id,
+                plan_digest,
+                json,
+            })
+        })
+        .await?
+        .map_err(AppErrorView::from)
 }
 
 #[tauri::command]

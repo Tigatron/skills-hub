@@ -4,11 +4,16 @@ import {
   type ActivityDetail,
   type ActivityItem,
   type ActivityQuery,
+  type AdapterConfigureRequest,
+  type AdapterDescriptorView,
+  type AdapterProjectTargetRegisterRequest,
   type AnyOperationView,
   type AppErrorView,
   type BatchDeploymentPlanRequest,
   type BatchDeploymentPlanView,
   type BootstrapState,
+  type ConfiguredAdapterView,
+  type CustomTargetRegisterRequest,
   type DeploymentHealthView,
   type DeploymentModeDto,
   type DeploymentPage,
@@ -16,15 +21,25 @@ import {
   type DeploymentPlanView,
   type DeploymentQuery,
   type DomainInvalidated,
+  type ExecuteLifecycleRequest,
   type ExecuteOperationRequest,
+  type IndexRebuildPlan,
+  type IndexRebuildResult,
   type InitializeVaultRequest,
   type JobRef,
   type KeepExternalRequest,
   type KeepExternalResult,
   type LibraryPage,
   type LibraryQuery,
+  type ManualProjectAddRequest,
+  type ManualProjectView,
+  type ObjectGcPhase,
+  type ObjectGcPlan,
+  type ObjectGcResult,
+  type ObjectGcSettingsSummary,
   type OperationCancelResult,
   type OperationIdRequest,
+  type PlanExportView,
   type RegisterTargetRequest,
   type Result,
   type ScanProgress,
@@ -41,9 +56,20 @@ import {
   type TrashEntryView,
   type TrashExecutionView,
   type TrashPlanView,
+  type TrashRetentionSummary,
   type UndeployPlanRequest,
+  type VaultPathRequest,
+  type VaultRelocatePlan,
+  type VaultRelocateResult,
+  type VaultRepairPlan,
   type VaultStatusView,
   type VaultSummary,
+  type VaultVerifyReport,
+  type WorkspaceRootAddRequest,
+  type WorkspaceRootPauseRequest,
+  type WorkspaceRootUpdateRequest,
+  type WorkspaceRootView,
+  type WorkspaceScanResultView,
 } from '../bindings';
 
 export class CommandError extends Error {
@@ -76,6 +102,16 @@ export const api = {
   scanGet: (jobId: string): Promise<ScanRunView> => unwrap(commands.scanGet(jobId)),
   scanCancel: (jobId: string) => unwrap(commands.scanCancel(jobId)),
   libraryList: (query: LibraryQuery): Promise<LibraryPage> => unwrap(commands.libraryList(query)),
+  adaptersList: (): Promise<AdapterDescriptorView[]> => commands.adaptersList(),
+  adaptersConfiguredList: (): Promise<ConfiguredAdapterView[]> =>
+    unwrap(commands.adaptersConfiguredList()),
+  adapterConfigure: (request: AdapterConfigureRequest): Promise<ConfiguredAdapterView> =>
+    unwrap(commands.adapterConfigure(request)),
+  customTargetRegister: (request: CustomTargetRegisterRequest): Promise<TargetView> =>
+    unwrap(commands.customTargetRegister(request)),
+  adapterProjectTargetRegister: (
+    request: AdapterProjectTargetRegisterRequest,
+  ): Promise<TargetView> => unwrap(commands.adapterProjectTargetRegister(request)),
   targetRegisterFixture: (request: RegisterTargetRequest): Promise<TargetView> =>
     unwrap(commands.targetRegisterFixture(request)),
   targetsList: (): Promise<TargetView[]> => unwrap(commands.targetsList()),
@@ -99,6 +135,8 @@ export const api = {
     unwrap(commands.operationCancel(request)),
   operationGet: (request: OperationIdRequest): Promise<AnyOperationView> =>
     unwrap(commands.operationGet(request)),
+  operationPlanExport: (request: OperationIdRequest): Promise<PlanExportView> =>
+    unwrap(commands.operationPlanExport(request)),
   skillGet: (request: SkillIdRequest): Promise<SkillDetail> => unwrap(commands.skillGet(request)),
   skillPreviewFile: (request: SkillPreviewRequest): Promise<TextPreview> =>
     unwrap(commands.skillPreviewFile(request)),
@@ -106,6 +144,8 @@ export const api = {
     unwrap(commands.activityList(query)),
   activityDetail: (id: string): Promise<ActivityDetail> => unwrap(commands.activityDetail(id)),
   trashEntriesList: (): Promise<TrashEntryView[]> => unwrap(commands.trashEntriesList()),
+  trashRetentionSummary: (): Promise<TrashRetentionSummary> =>
+    unwrap(commands.trashRetentionSummary()),
   trashMovePlan: (skillId: string): Promise<TrashPlanView> =>
     unwrap(commands.trashMovePlan({ skillId })),
   trashRestorePlan: (entryId: string): Promise<TrashPlanView> =>
@@ -121,9 +161,41 @@ export const api = {
     return unwrap(commands.trashPermanentDeleteExecute(request));
   },
   operationUndoPlan: (request: OperationIdRequest) => unwrap(commands.operationUndoPlan(request)),
+  workspaceRootsList: (): Promise<WorkspaceRootView[]> => unwrap(commands.workspaceRootsList()),
+  workspaceRootAdd: (request: WorkspaceRootAddRequest): Promise<WorkspaceRootView> =>
+    unwrap(commands.workspaceRootAdd(request)),
+  workspaceRootUpdate: (request: WorkspaceRootUpdateRequest): Promise<WorkspaceRootView> =>
+    unwrap(commands.workspaceRootUpdate(request)),
+  workspaceRootPause: (request: WorkspaceRootPauseRequest): Promise<WorkspaceRootView> =>
+    unwrap(commands.workspaceRootPause(request)),
+  workspaceRootRemove: (rootId: string) => unwrap(commands.workspaceRootRemove({ rootId })),
+  workspaceRootRescan: (rootId: string): Promise<WorkspaceScanResultView> =>
+    unwrap(commands.workspaceRootRescan({ rootId })),
+  manualProjectsList: (): Promise<ManualProjectView[]> => unwrap(commands.manualProjectsList()),
+  manualProjectAdd: (request: ManualProjectAddRequest): Promise<ManualProjectView> =>
+    unwrap(commands.manualProjectAdd(request)),
+  manualProjectRescan: (projectId: string): Promise<WorkspaceScanResultView> =>
+    unwrap(commands.manualProjectRescan({ projectId })),
+  vaultVerify: (): Promise<VaultVerifyReport> => unwrap(commands.vaultVerify()),
+  vaultRepairPlan: (): Promise<VaultRepairPlan> => unwrap(commands.vaultRepairPlan()),
+  vaultRepairExecute: (request: ExecuteLifecycleRequest): Promise<number> =>
+    unwrap(commands.vaultRepairExecute(request)),
+  vaultIndexRebuildPlan: (): Promise<IndexRebuildPlan> => unwrap(commands.vaultIndexRebuildPlan()),
+  vaultIndexRebuildExecute: (request: ExecuteLifecycleRequest): Promise<IndexRebuildResult> =>
+    unwrap(commands.vaultIndexRebuildExecute(request)),
+  vaultObjectGcSettings: (): Promise<ObjectGcSettingsSummary> =>
+    unwrap(commands.vaultObjectGcSettings()),
+  vaultObjectGcPlan: (phase: ObjectGcPhase): Promise<ObjectGcPlan> =>
+    unwrap(commands.vaultObjectGcPlan({ phase })),
+  vaultObjectGcExecute: (request: ExecuteLifecycleRequest): Promise<ObjectGcResult> =>
+    unwrap(commands.vaultObjectGcExecute(request)),
+  vaultRelocatePlan: (request: VaultPathRequest): Promise<VaultRelocatePlan> =>
+    unwrap(commands.vaultRelocatePlan(request)),
+  vaultRelocateExecute: (request: ExecuteLifecycleRequest): Promise<VaultRelocateResult> =>
+    unwrap(commands.vaultRelocateExecute(request)),
 };
 
-export type NavId = 'library' | 'deployments' | 'activity';
+export type NavId = 'library' | 'deployments' | 'activity' | 'trash' | 'settings';
 
 export type ReviewedPlan =
   | { kind: 'takeover'; plan: TakeoverPlanView }

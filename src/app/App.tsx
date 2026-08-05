@@ -5,16 +5,18 @@ import { Button } from 'react-aria-components';
 import { api, listenDomainInvalidated, type NavId } from '../lib/api';
 import { invalidateFromDomainEvent, queryKeys } from '../lib/query';
 import { ActivityPanel } from './ActivityPanel';
-import { ErrorBanner, LoadingBlock, PrimaryButton } from './components';
+import { ErrorBanner, LoadingBlock } from './components';
 import { DeploymentsPanel } from './DeploymentsPanel';
 import { FirstRun } from './FirstRun';
 import { LibraryPanel } from './LibraryPanel';
+import { SettingsPanel } from './SettingsPanel';
+import { SetupChecklist } from './SetupChecklist';
+import { TrashPanel } from './TrashPanel';
 import styles from './thin.module.css';
 
 export function App() {
   const queryClient = useQueryClient();
   const [nav, setNav] = useState<NavId>('library');
-  const [setupDismissed, setSetupDismissed] = useState(false);
 
   const bootstrap = useQuery({
     queryKey: queryKeys.bootstrap,
@@ -107,6 +109,11 @@ export function App() {
             <NavButton id="deployments" current={nav} onSelect={setNav} label="Deployments" />
             <NavButton id="activity" current={nav} onSelect={setNav} label="Activity" />
           </div>
+          <div className={styles.navGroup}>
+            <div className={styles.navLabel}>Manage</div>
+            <NavButton id="trash" current={nav} onSelect={setNav} label="Trash" />
+            <NavButton id="settings" current={nav} onSelect={setNav} label="Settings" />
+          </div>
           <div className={styles.navFoot}>
             <div>Vault</div>
             <div>{bootstrap.data?.vaultPath ?? vaultStatus.data?.rootPath ?? 'Initialized'}</div>
@@ -118,19 +125,13 @@ export function App() {
         </nav>
 
         <div className={styles.main}>
-          {!setupDismissed ? (
-            <div className={styles.noticeBar}>
-              <span>
-                Setup checklist: Vault ready → scan Universal global → Add to Vault → deploy →
-                verify → undeploy. Scans report “No files were changed.”
-              </span>
-              <PrimaryButton onPress={() => setSetupDismissed(true)}>Dismiss</PrimaryButton>
-            </div>
-          ) : null}
+          <SetupChecklist />
           <div className={styles.mainContent}>
             {nav === 'library' ? <LibraryPanel /> : null}
             {nav === 'deployments' ? <DeploymentsPanel /> : null}
             {nav === 'activity' ? <ActivityPanel /> : null}
+            {nav === 'trash' ? <TrashPanel /> : null}
+            {nav === 'settings' ? <SettingsPanel /> : null}
           </div>
         </div>
       </div>
