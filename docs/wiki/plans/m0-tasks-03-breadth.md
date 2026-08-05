@@ -230,7 +230,7 @@ Completed on 2026-08-05 with schema-v5 internal-Vault Operations for move, resto
 
 | Field | Value |
 | --- | --- |
-| Status | Complete (2026-08-05) |
+| Status | Planned |
 | Dependencies | M0-009, M0-010, M0-011, M0-012, M0-013 |
 | PRD coverage | SCN-05/09, IMP-01/02, DPL-10/12, DEL-01/02/03/04/05, VLT-06; PRD §9 information architecture and §12 UX brief |
 | Design | [Tauri/UI contract](../interfaces/tauri-and-ui-state.md), [System context](../architecture/system-context.md), [Testing and acceptance](../quality/testing-and-acceptance.md) |
