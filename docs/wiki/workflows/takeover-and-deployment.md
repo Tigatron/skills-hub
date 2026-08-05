@@ -32,6 +32,10 @@ The Universal-fixture deployment seam registers Global, Git-project, and non-Git
 
 The same fixture Target authority now builds one schema-v4 plan for 2–20 explicitly selected Target IDs and requested modes. Entries are ordered deterministically, mixed absolute symlinks and Managed Copies stage completely before the first active rename, all destructive entries share one operation-level Snapshot set, and target-index failures compensate in reverse. Batch manifest publication is replayable, all relationship/Operation/Snapshot/Activity rows finalize in one critical SQLite transaction, and startup reopen continues verification/finalization or compensation from journal evidence without an in-memory plan map.
 
+# M0-011 implementation evidence
+
+The generic deployment seam now accepts all six verified descriptor families, global/project overrides, and custom targets without family-specific mutation code. Persisted configuration controls adapter enablement and path metadata. Custom registration captures display name, scope label, preferred mode, optional project association, canonical root, and filesystem identity; root replacement blocks planning until explicit reselection refreshes that same Target authority. All families share global/Git/non-Git defaults, capability fallback rules, collision checks, snapshots, rollback, post-commit verification, manifests, and durable deployment rows. A Target descriptor-version change makes related deployment health `Unverified` while retaining its path and prior deployment evidence.
+
 # Takeover plan
 
 The preview contains:

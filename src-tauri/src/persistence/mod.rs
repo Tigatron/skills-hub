@@ -14,11 +14,12 @@ pub use manifests::{
 pub use migrations::{DatabaseSettings, MigrationError, replace_database_file};
 pub use repositories::{
     ActivityDetailRecord, ActivityListRecord, ActivityQuery, ActivityRecord,
-    BatchDeploymentProjection, DeploymentProjection, DeploymentRecord, ExternalObservationRecord,
-    ManagedLinkRecord, ObjectRecord, ObservationRecord, OperationRecord, OperationStepRecord,
-    ProjectRecord, Repositories, RepositoryError, ScanErrorRecord, ScanReconciliation,
-    ScanRunRecord, SkillRecord, SkillRevisionRecord, SkillSourceRecord, SnapshotItemRecord,
-    SnapshotRecord, TakeoverProjection, TargetRecord, WorkspaceRootRecord,
+    AdapterConfigurationRecord, AuthorizationIdentityRecord, BatchDeploymentProjection,
+    DeploymentProjection, DeploymentRecord, ExternalObservationRecord, ManagedLinkRecord,
+    ObjectRecord, ObservationRecord, OperationRecord, OperationStepRecord, ProjectRecord,
+    Repositories, RepositoryError, ScanErrorRecord, ScanReconciliation, ScanRunRecord, SkillRecord,
+    SkillRevisionRecord, SkillSourceRecord, SnapshotItemRecord, SnapshotRecord, TakeoverProjection,
+    TargetRecord, TargetRegistrationMetadataRecord, WorkspaceCoverageRecord, WorkspaceRootRecord,
 };
 pub use vault::{
     OpenVault, VaultError, VaultPaths, default_application_support, default_vault_path,

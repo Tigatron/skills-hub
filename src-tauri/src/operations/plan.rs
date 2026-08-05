@@ -1142,7 +1142,6 @@ fn validate_deployment(
         || step.resolved_mode != Some(deployment.resolved_mode)
         || step.before.adapter_id != target.adapter_id
         || step.after.adapter_id != target.adapter_id
-        || target.is_custom
         || (!preserves_changed_target
             && (target.capability.directory_write != CapabilityStatus::Supported
                 || target.capability.atomic_rename != CapabilityStatus::Supported))
@@ -1154,11 +1153,14 @@ fn validate_deployment(
             target.project_id.is_none() && target.project_git_classification.is_none()
         }
         TakeoverTargetScope::Project => {
-            target.project_id.is_some()
+            (target.project_id.is_some()
                 && matches!(
                     target.project_git_classification.as_deref(),
                     Some("git" | "none")
-                )
+                ))
+                || (target.is_custom
+                    && target.project_id.is_none()
+                    && target.project_git_classification.is_none())
         }
     };
     if !authority_consistent {
@@ -1396,11 +1398,14 @@ fn validate_batch_deployment(
                     && entry.target.project_git_classification.is_none()
             }
             TakeoverTargetScope::Project => {
-                entry.target.project_id.is_some()
+                (entry.target.project_id.is_some()
                     && matches!(
                         entry.target.project_git_classification.as_deref(),
                         Some("git" | "none")
-                    )
+                    ))
+                    || (entry.target.is_custom
+                        && entry.target.project_id.is_none()
+                        && entry.target.project_git_classification.is_none())
             }
         };
         if !vault_root.is_absolute()
@@ -1429,7 +1434,6 @@ fn validate_batch_deployment(
             || step.before.adapter_id != entry.target.adapter_id
             || step.after.adapter_id != entry.target.adapter_id
             || entry.deployment.deployment_updated_at < entry.deployment.deployment_created_at
-            || entry.target.is_custom
             || !authority_consistent
             || entry.target.capability.directory_write != CapabilityStatus::Supported
             || entry.target.capability.atomic_rename != CapabilityStatus::Supported
@@ -2330,10 +2334,7 @@ mod tests {
 
         let mut custom = content.clone();
         custom.deployment.as_mut().unwrap().target.is_custom = true;
-        assert!(matches!(
-            OperationPlan::build(custom),
-            Err(PlanBuildError::InvalidDeploymentContext)
-        ));
+        OperationPlan::build(custom).expect("custom targets use the generic operation contract");
 
         let mut unknown_project = content.clone();
         let target = &mut unknown_project.deployment.as_mut().unwrap().target;

@@ -49,6 +49,12 @@ const MIGRATIONS: &[Migration] = &[
         sql: include_str!("migrations/0003_activity_projection.sql"),
         checksum: "1645cae6c411a15501f38b4b6e202dcfe78f8966ebf938d3dc98cb1de42c5887",
     },
+    Migration {
+        version: 4,
+        name: "adapter_configurations",
+        sql: include_str!("migrations/0004_adapter_configurations.sql"),
+        checksum: "34f4e62050954fef9cdcb2a86d23fae5769c69169ef669c561bd35f80c4bc3dd",
+    },
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]

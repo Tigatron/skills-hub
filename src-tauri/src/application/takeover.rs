@@ -12,7 +12,10 @@ use specta::Type;
 use thiserror::Error;
 
 use crate::{
-    application::activity::ActivityService,
+    application::{
+        activity::ActivityService,
+        deployment::{configured_override_matches, ensure_target_is_configured},
+    },
     domain::{
         ActivityId, BundleRelativePath, DeploymentHealth, DeploymentId, DeploymentMode,
         DurationMillis, ObservationId, OperationId, OperationOutcome, OperationState, SkillId,
@@ -428,6 +431,8 @@ impl TakeoverService {
                 is_custom,
                 existing_target,
             ) = if let Some(value) = existing {
+                ensure_target_is_configured(&self.vault.repositories, &value)
+                    .map_err(|error| TakeoverError::InvalidSelection(error.to_string()))?;
                 let authorized = AuthorizedRoot::open(&value.root_path)
                     .map_err(|error| TakeoverError::InvalidSelection(error.to_string()))?;
                 if value.scope != observation.scope
@@ -449,6 +454,19 @@ impl TakeoverService {
                     true,
                 )
             } else {
+                let is_custom = observation.source_root_kind == "custom";
+                let is_override = if is_custom {
+                    false
+                } else {
+                    configured_override_matches(
+                        &self.vault.repositories,
+                        &observation.adapter_id,
+                        &scope,
+                        observation.project_id,
+                        parent,
+                    )
+                    .map_err(|error| TakeoverError::InvalidSelection(error.to_string()))?
+                };
                 let target = *planned_targets
                     .entry((
                         observation.adapter_id.to_string(),
@@ -461,8 +479,8 @@ impl TakeoverService {
                     parent.to_path_buf(),
                     parent.to_path_buf(),
                     observation.project_id,
-                    false,
-                    observation.source_root_kind == "custom",
+                    is_override,
+                    is_custom,
                     false,
                 )
             };
@@ -539,6 +557,7 @@ impl TakeoverService {
         Ok(plan_view(&plan, context))
     }
 
+    #[allow(clippy::too_many_lines)]
     pub fn execute_operation(
         &self,
         operation_id: &str,
@@ -565,6 +584,35 @@ impl TakeoverService {
             return Err(TakeoverError::Journal(
                 "reviewed Vault authority differs from the open Vault".into(),
             ));
+        }
+        if stored.journal.state == OperationState::Planned {
+            for replacement in &context.replacements {
+                if replacement.is_custom {
+                    continue;
+                }
+                if let Some(target) = self.vault.repositories.target(replacement.target_id)? {
+                    ensure_target_is_configured(&self.vault.repositories, &target)
+                        .map_err(|error| TakeoverError::InvalidSelection(error.to_string()))?;
+                } else {
+                    let scope = match replacement.target_scope {
+                        TakeoverTargetScope::Global => "global",
+                        TakeoverTargetScope::Project => "project",
+                    };
+                    let is_override = configured_override_matches(
+                        &self.vault.repositories,
+                        &replacement.adapter_id,
+                        scope,
+                        replacement.project_id,
+                        Path::new(&replacement.target_canonical_root),
+                    )
+                    .map_err(|error| TakeoverError::InvalidSelection(error.to_string()))?;
+                    if replacement.is_override != is_override {
+                        return Err(TakeoverError::InvalidSelection(
+                            "reviewed target configuration changed".into(),
+                        ));
+                    }
+                }
+            }
         }
         let mut roots = TargetRoots::new();
         roots.insert(
@@ -1904,6 +1952,7 @@ mod tests {
 
     use super::*;
     use crate::{
+        application::deployment::{AdapterConfigureRequest, DeploymentService},
         domain::{AdapterId, DeploymentName, ProjectId, normalized_path_identity},
         operations::{OperationBoundary, OperationFailpoints},
         persistence::{ObservationRecord, ProjectRecord},
@@ -1993,7 +2042,7 @@ mod tests {
             .upsert_observation(ObservationRecord {
                 id: observation_id,
                 skill_id: None,
-                adapter_id,
+                adapter_id: adapter_id.clone(),
                 scope: "global".into(),
                 project_id: None,
                 source_root_kind: "test".into(),
@@ -2589,6 +2638,100 @@ mod tests {
         assert_eq!(authority_b.project_id, Some(project_b));
         assert!(authority_b.is_override);
         assert!(!authority_b.is_custom);
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn reviewed_add_and_manage_is_revoked_when_adapter_is_disabled() {
+        let fixture = fixture("example", "skill\n");
+        let (selected_id, selected) =
+            add_observation(&fixture, "selected-root", "renamed-example", "skill\n");
+        let adapter_id = crate::adapters::DESCRIPTORS[0].id();
+        let adapter_text = adapter_id.to_string();
+        let source_root_id = format!("{adapter_id}:global-override");
+        let observation_ids = [fixture.observation_id.to_string(), selected_id.to_string()];
+        fixture
+            .service
+            .vault
+            .database
+            .execute(move |connection| {
+                for id in observation_ids {
+                    connection.execute(
+                        "UPDATE observations SET adapter_id=?1, source_root_id=?2 WHERE id=?3",
+                        rusqlite::params![adapter_text, source_root_id, id],
+                    )?;
+                }
+                Ok(())
+            })
+            .unwrap();
+        let override_root = selected.parent().unwrap().canonicalize().unwrap();
+        let deployment = DeploymentService::new(Arc::clone(&fixture.service.vault));
+        deployment
+            .configure_adapter(&AdapterConfigureRequest {
+                adapter_id: adapter_id.to_string(),
+                enabled: true,
+                global_override_path: Some(override_root.to_string_lossy().into_owned()),
+                project_override_path: None,
+            })
+            .unwrap();
+        let reviewed = fixture
+            .service
+            .plan_takeover(TakeoverPlanRequest {
+                source_observation_id: fixture.observation_id.to_string(),
+                decision: TakeoverDecisionDto::AddAndManage,
+                selected_locations: vec![SelectedLocationRequest {
+                    observation_id: selected_id.to_string(),
+                    mode: DeploymentModeDto::Symlink,
+                }],
+            })
+            .unwrap();
+        let before = hash_bundle(&selected, BundleCaps::default())
+            .unwrap()
+            .digest;
+        deployment
+            .configure_adapter(&AdapterConfigureRequest {
+                adapter_id: adapter_id.to_string(),
+                enabled: false,
+                global_override_path: Some(override_root.to_string_lossy().into_owned()),
+                project_override_path: None,
+            })
+            .unwrap();
+        let stored = OperationStore::open(fixture.service.vault.paths.manager())
+            .unwrap()
+            .load(OperationId::from_str(&reviewed.operation_id).unwrap())
+            .unwrap();
+        assert_eq!(stored.journal.state, OperationState::Planned);
+        let replacement = &stored.plan.content.takeover.as_ref().unwrap().replacements[0];
+        assert!(!replacement.is_custom);
+        assert_eq!(replacement.adapter_id, adapter_id);
+        assert!(
+            configured_override_matches(
+                &fixture.service.vault.repositories,
+                &replacement.adapter_id,
+                "global",
+                None,
+                Path::new(&replacement.target_canonical_root),
+            )
+            .is_err()
+        );
+        assert!(
+            fixture
+                .service
+                .execute_operation(&reviewed.operation_id, &reviewed.plan_digest)
+                .is_err()
+        );
+        assert_eq!(
+            hash_bundle(&selected, BundleCaps::default())
+                .unwrap()
+                .digest,
+            before
+        );
+        assert!(
+            !fs::symlink_metadata(&selected)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
     }
 
     #[test]

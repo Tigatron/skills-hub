@@ -4,13 +4,48 @@ use tauri::{AppHandle, State};
 use tauri_specta::Event;
 
 use crate::{
+    adapters::{AdapterDescriptorView, descriptors},
     application::scanning::{
         CancelResult, DomainInvalidated, JobRef, LibraryPage, LibraryQuery, ScanEventSink,
-        ScanProgress, ScanRequest, ScanRunView,
+        ScanProgress, ScanRequest, ScanRunView, ScanSource,
     },
     error::AppErrorView,
     runtime::AppRuntime,
 };
+
+#[tauri::command]
+#[specta::specta]
+pub fn adapters_list() -> Vec<AdapterDescriptorView> {
+    descriptors()
+}
+
+/// Starts independent read-only scans for every built-in global source.
+#[tauri::command]
+#[specta::specta]
+pub async fn scan_all_global(
+    app: AppHandle,
+    runtime: State<'_, AppRuntime>,
+) -> Result<Vec<JobRef>, AppErrorView> {
+    let service = runtime.scanning_service()?;
+    let mut jobs = Vec::new();
+    for root in service
+        .configured_global_roots()
+        .map_err(AppErrorView::from)?
+    {
+        jobs.push(
+            service
+                .start(
+                    ScanRequest {
+                        source: ScanSource::ConfiguredGlobal(root.source_root_id),
+                    },
+                    Arc::new(TauriScanEvents(app.clone())),
+                )
+                .await
+                .map_err(AppErrorView::from)?,
+        );
+    }
+    Ok(jobs)
+}
 
 #[derive(Clone)]
 struct TauriScanEvents(AppHandle);

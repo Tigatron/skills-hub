@@ -55,12 +55,23 @@ These PRD defaults are implementation inputs that `M0-011` must verify against c
 | --- | --- | --- | --- |
 | `universal-agent-skills` | `~/.agents/skills` | `.agents/skills` | Symlink, Managed Copy, Copy fallback |
 | `claude-code` | `~/.claude/skills` | `.claude/skills` | Symlink, Managed Copy, Copy fallback |
-| `openai-codex` | `~/.codex/skills` | `.codex/skills` | Symlink, Managed Copy, Copy fallback |
+| `openai-codex` | `~/.agents/skills` | `.agents/skills` | Symlink, Managed Copy, Copy fallback |
 | `cursor` | `~/.cursor/skills` | `.cursor/skills` | Symlink, Managed Copy, Copy fallback |
 | `gemini-cli` | `~/.gemini/skills` | `.gemini/skills` | Symlink, Managed Copy, Copy fallback |
 | `opencode` | `~/.config/opencode/skills` | `.opencode/skills` | Symlink, Managed Copy, Copy fallback |
 
-Before `M0-011` marks any descriptor verified, implementation must check current official documentation and record source URL, verification date, supported scope, and caveats in adapter fixtures/docs. A path override keeps the product usable if upstream conventions change.
+`M0-011` verified the descriptors on 2026-08-05 against current official documentation:
+
+| Adapter | Official source | Verification caveat |
+| --- | --- | --- |
+| Universal Agent Skills | [Agent Skills client implementation](https://agentskills.io/client-implementation/adding-skills-support) | `.agents/skills` is an interoperability convention; the Skill format specification does not mandate installation paths. |
+| Claude Code | [Claude Code Skills](https://code.claude.com/docs/en/skills) | Supports personal/project paths, directory symlinks, and additional nested/project precedence behavior. |
+| OpenAI Codex | [Codex Skills](https://developers.openai.com/codex/skills/) | Current official local paths are `.agents/skills`, not the earlier PRD `.codex/skills` draft; repository discovery also scans ancestors. |
+| Cursor | [Cursor Agent Skills](https://cursor.com/docs/context/skills) | Also reads `.agents`, Claude, and Codex compatibility paths and supports recursive/nested discovery. |
+| Gemini CLI | [Gemini CLI Agent Skills](https://geminicli.com/docs/cli/skills/) | Also reads `.agents/skills`, with that alias taking precedence within a scope. |
+| OpenCode | [OpenCode Agent Skills](https://opencode.ai/docs/skills) | Also reads Claude/`.agents` compatibility paths and walks project ancestors to the Git worktree. |
+
+A path override keeps the product usable if upstream conventions change. Descriptor versions must be incremented when path, compatibility, or deployment semantics require renewed validation.
 
 # Path expansion
 
@@ -82,7 +93,7 @@ A Target is one concrete adapter/scope/root tuple. The adapter declares supporte
 
 Adapters do not silently decide fallback during execution.
 
-The M0-007 vertical slice exercises these rules through a versioned Universal fixture adapter and registered Global, Git-project, and non-Git personal-project Targets. Registration records stable adapter/scope/root/project identity; planning reopens that authority, probes write/rename/link behavior, and seals the result. A proven unsupported link produces a new Managed Copy plan with a fallback reason, while `Unknown` blocks. The six verified production descriptors and custom-target breadth remain M0-011 work.
+The M0-007 vertical slice established these rules through a versioned Universal fixture. M0-011 broadened the same generic path to all six production descriptors and custom targets. Registration records stable adapter/scope/root/project identity plus custom display/mode and selected-root filesystem identity; planning reopens that authority, probes write/rename/link behavior, and seals the result. A proven unsupported link produces a new Managed Copy plan with a fallback reason, while `Unknown` blocks.
 
 # Custom target directories
 

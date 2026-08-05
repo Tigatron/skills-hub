@@ -13,7 +13,7 @@ use tauri_specta::Event;
 use thiserror::Error;
 
 use crate::{
-    adapters::universal_global_root,
+    adapters::{GlobalAdapterRoot, global_roots},
     domain::{
         ActivityId, AdapterId, BundleDigest, ObservationId, ScanRunId, UtcTimestamp,
         normalized_collision_key, normalized_path_identity,
@@ -40,10 +40,11 @@ pub struct ScanRequest {
     pub source: ScanSource,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, Type)]
+#[derive(Debug, Clone, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 pub enum ScanSource {
     UniversalGlobal,
+    ConfiguredGlobal(String),
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -190,7 +191,12 @@ impl ScanningService {
         events: Arc<dyn ScanEventSink>,
     ) -> Result<JobRef, ScanningServiceError> {
         let adapter = match request.source {
-            ScanSource::UniversalGlobal => universal_global_root(&self.home),
+            ScanSource::UniversalGlobal => global_roots(&self.home).remove(0),
+            ScanSource::ConfiguredGlobal(source_id) => self
+                .configured_global_roots()?
+                .into_iter()
+                .find(|root| root.source_root_id == source_id)
+                .ok_or(ScanningServiceError::UnknownSource)?,
         };
         // Resolve durable deployment evidence before publishing a queued job. If this read fails,
         // the command returns an error without leaving an in-memory or persisted job stuck forever.
@@ -202,8 +208,8 @@ impl ScanningService {
         let view = ScanRunView {
             job_id: job_id.to_string(),
             adapter_id: adapter.adapter_id.to_string(),
-            source_root_id: adapter.source_root_id.to_owned(),
-            source_name: adapter.display_name.to_owned(),
+            source_root_id: adapter.source_root_id.clone(),
+            source_name: adapter.display_name.clone(),
             display_root: display_path(&adapter.root)?,
             state: ScanRunState::Queued,
             coverage: coverage_view(CoverageState::Partial),
@@ -221,14 +227,14 @@ impl ScanningService {
         });
         if let Some(existing) =
             self.jobs
-                .insert_unless_active(job_id, Arc::clone(&job), adapter.source_root_id)?
+                .insert_unless_active(job_id, Arc::clone(&job), &adapter.source_root_id)?
         {
             return Ok(existing);
         }
 
         let queued = scan_run_record(
             job_id,
-            adapter.source_root_id,
+            &adapter.source_root_id,
             ScanRunState::Queued,
             CoverageState::Partial,
             started_at,
@@ -245,7 +251,7 @@ impl ScanningService {
 
         let scan_request = GlobalScanRequest {
             adapter_id: adapter.adapter_id,
-            source_root_id: adapter.source_root_id.to_owned(),
+            source_root_id: adapter.source_root_id.clone(),
             root: adapter.root,
             caps: BundleCaps::default(),
             managed_links,
@@ -260,6 +266,55 @@ impl ScanningService {
         Ok(JobRef {
             job_id: job_id.to_string(),
         })
+    }
+
+    /// Resolves only enabled, persisted global sources. Project custom targets are intentionally
+    /// left to manual-project scanning because their observations are not global.
+    pub fn configured_global_roots(&self) -> Result<Vec<GlobalAdapterRoot>, ScanningServiceError> {
+        let configurations = self
+            .repositories
+            .adapter_configurations()
+            .map_err(ScanningServiceError::Repository)?;
+        let mut roots = Vec::new();
+        for descriptor in crate::adapters::DESCRIPTORS {
+            let configuration = configurations
+                .iter()
+                .find(|row| row.adapter_name == descriptor.name);
+            if configuration.is_some_and(|row| !row.enabled) {
+                continue;
+            }
+            roots.push(descriptor.global_root(&self.home));
+            if let Some(path) = configuration.and_then(|row| row.global_override_path.clone()) {
+                roots.push(GlobalAdapterRoot {
+                    adapter_id: descriptor.id(),
+                    source_root_id: format!("{}:global-override", descriptor.id()),
+                    display_name: format!("{} override", descriptor.display_name),
+                    root: path,
+                });
+            }
+        }
+        for target in self
+            .repositories
+            .targets(500)
+            .map_err(ScanningServiceError::Repository)?
+            .into_iter()
+            .filter(|target| target.is_custom && target.scope == "global")
+        {
+            roots.push(GlobalAdapterRoot {
+                adapter_id: target.adapter_id,
+                source_root_id: format!("custom-directory@1:target:{}", target.id),
+                display_name: self
+                    .repositories
+                    .target_registration_metadata(target.id)
+                    .map_err(ScanningServiceError::Repository)?
+                    .map_or_else(
+                        || "Custom directory".into(),
+                        |metadata| metadata.display_name,
+                    ),
+                root: target.root_path,
+            });
+        }
+        Ok(roots)
     }
 
     pub fn get(&self, job_id: &str) -> Result<ScanRunView, ScanningServiceError> {
@@ -1164,6 +1219,8 @@ fn matches_filter(item: &LibraryItem, filter: LibraryFilter) -> bool {
 
 #[derive(Debug, Error)]
 pub enum ScanningServiceError {
+    #[error("configured scan source is unknown")]
+    UnknownSource,
     #[error("scan database failed: {0}")]
     Repository(RepositoryError),
     #[error("scan background worker failed: {0}")]
@@ -1541,6 +1598,144 @@ mod tests {
     fn repository_fixture_can_open_at_current_schema() {
         let directory = tempfile::tempdir().unwrap();
         let database = DbExecutor::open(directory.path().join("index.sqlite")).unwrap();
-        assert_eq!(database.settings().unwrap().schema_version, 3);
+        assert_eq!(database.settings().unwrap().schema_version, 5);
+    }
+
+    #[test]
+    fn configured_roots_persist_disable_override_custom_and_reenable_breadth() {
+        let directory = tempfile::tempdir().unwrap();
+        let home = directory.path().join("home");
+        let override_root = directory.path().join("cursor-override");
+        let custom_root = directory.path().join("custom-global");
+        fs::create_dir_all(&home).unwrap();
+        fs::create_dir(&override_root).unwrap();
+        fs::create_dir(&custom_root).unwrap();
+        let vault = OpenVault::open(
+            &directory.path().join("vault"),
+            &directory.path().join("support"),
+            &[override_root.clone(), custom_root.clone()],
+        )
+        .unwrap();
+        let now = UtcTimestamp::now();
+        vault
+            .repositories
+            .upsert_adapter_configuration(crate::persistence::AdapterConfigurationRecord {
+                adapter_name: "claude-code".into(),
+                adapter_id: "claude-code@1".parse().unwrap(),
+                enabled: false,
+                global_override_path: None,
+                project_override_path: None,
+                created_at: now,
+                updated_at: now,
+            })
+            .unwrap();
+        vault
+            .repositories
+            .upsert_adapter_configuration(crate::persistence::AdapterConfigurationRecord {
+                adapter_name: "cursor".into(),
+                adapter_id: "cursor@1".parse().unwrap(),
+                enabled: true,
+                global_override_path: Some(override_root.clone()),
+                project_override_path: Some(".custom/cursor-skills".into()),
+                created_at: now,
+                updated_at: now,
+            })
+            .unwrap();
+        let custom_id = crate::domain::TargetId::generate();
+        vault
+            .repositories
+            .upsert_target(crate::persistence::TargetRecord {
+                id: custom_id,
+                adapter_id: "custom-directory@1".parse().unwrap(),
+                scope: "global".into(),
+                root_path: custom_root.clone(),
+                canonical_root_path: custom_root.canonicalize().unwrap(),
+                project_id: None,
+                is_override: false,
+                is_custom: true,
+                created_at: now,
+                updated_at: now,
+            })
+            .unwrap();
+        let service = ScanningService::new(
+            home,
+            vault.repositories.clone(),
+            BlockingWorkPool::new(2),
+            ScanJobs::default(),
+        );
+
+        let roots = service.configured_global_roots().unwrap();
+        assert_eq!(roots.len(), 7);
+        assert!(
+            roots
+                .iter()
+                .all(|root| root.adapter_id.name() != "claude-code")
+        );
+        assert!(
+            roots
+                .iter()
+                .any(|root| root.source_root_id == "cursor@1:global-override")
+        );
+        assert!(roots.iter().any(|root| {
+            root.source_root_id == format!("custom-directory@1:target:{custom_id}")
+        }));
+
+        vault
+            .repositories
+            .upsert_adapter_configuration(crate::persistence::AdapterConfigurationRecord {
+                adapter_name: "claude-code".into(),
+                adapter_id: "claude-code@1".parse().unwrap(),
+                enabled: true,
+                global_override_path: None,
+                project_override_path: None,
+                created_at: now,
+                updated_at: UtcTimestamp::now(),
+            })
+            .unwrap();
+        assert_eq!(service.configured_global_roots().unwrap().len(), 8);
+    }
+
+    #[tokio::test]
+    async fn six_enabled_default_roots_scan_independently_without_writes() {
+        let directory = tempfile::tempdir().unwrap();
+        let home = directory.path().join("home");
+        fs::create_dir(&home).unwrap();
+        for root in global_roots(&home) {
+            let skill = root.root.join("fixture-skill");
+            fs::create_dir_all(&skill).unwrap();
+            fs::write(skill.join("SKILL.md"), root.adapter_id.to_string()).unwrap();
+        }
+        let vault = OpenVault::open(
+            &directory.path().join("vault"),
+            &directory.path().join("support"),
+            &[],
+        )
+        .unwrap();
+        let service = ScanningService::new(
+            home,
+            vault.repositories.clone(),
+            BlockingWorkPool::new(2),
+            ScanJobs::default(),
+        );
+        let events: Arc<dyn ScanEventSink> = Arc::new(CapturingScanEvents::default());
+        let roots = service.configured_global_roots().unwrap();
+        assert_eq!(roots.len(), 6);
+        for root in roots {
+            let manifest = root.root.join("fixture-skill/SKILL.md");
+            let before = fs::read(&manifest).unwrap();
+            let job = service
+                .start(
+                    ScanRequest {
+                        source: ScanSource::ConfiguredGlobal(root.source_root_id),
+                    },
+                    Arc::clone(&events),
+                )
+                .await
+                .unwrap();
+            let terminal = wait_for_terminal(&service, &job.job_id).await;
+            assert_eq!(terminal.state, ScanRunState::Completed);
+            assert_eq!(terminal.observation_count, 1);
+            assert_eq!(fs::read(manifest).unwrap(), before);
+        }
     }
 }

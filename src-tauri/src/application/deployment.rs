@@ -40,9 +40,10 @@ use crate::{
         TakeoverTargetScope, TargetCapabilityEvidence, TargetRoots, UndeployResolution,
     },
     persistence::{
-        ActivityRecord, BatchDeploymentProjection, DeploymentManifest, DeploymentProjection,
-        DeploymentRecord, ManifestError, OpenVault, OperationRecord, ProjectRecord,
-        RepositoryError, SnapshotItemRecord, SnapshotRecord, TargetRecord,
+        ActivityRecord, AdapterConfigurationRecord, BatchDeploymentProjection, DeploymentManifest,
+        DeploymentProjection, DeploymentRecord, ManifestError, OpenVault, OperationRecord,
+        ProjectRecord, Repositories, RepositoryError, SnapshotItemRecord, SnapshotRecord,
+        TargetRecord, TargetRegistrationMetadataRecord,
     },
 };
 
@@ -64,6 +65,52 @@ pub enum FixtureTargetKindDto {
 pub struct RegisterTargetRequest {
     pub kind: FixtureTargetKindDto,
     pub selected_directory: String,
+    pub adapter_id: Option<String>,
+    pub is_override: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AdapterConfigureRequest {
+    pub adapter_id: String,
+    pub enabled: bool,
+    pub global_override_path: Option<String>,
+    pub project_override_path: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AdapterProjectTargetRegisterRequest {
+    pub adapter_id: String,
+    pub project_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfiguredAdapterView {
+    pub adapter_id: String,
+    pub display_name: String,
+    pub enabled: bool,
+    pub global_override_path: Option<String>,
+    pub project_override_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum CustomTargetScope {
+    Global,
+    Project,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CustomTargetRegisterRequest {
+    pub target_id: Option<String>,
+    pub display_name: String,
+    pub selected_directory: String,
+    pub scope: CustomTargetScope,
+    pub preferred_mode: DeploymentModeDto,
+    pub project_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -377,6 +424,7 @@ impl DeploymentService {
         self
     }
 
+    #[allow(clippy::too_many_lines)]
     pub fn register_target(
         &self,
         request: &RegisterTargetRequest,
@@ -386,7 +434,13 @@ impl DeploymentService {
             AuthorizedRoot::open(&selected).map_err(|_| DeploymentError::InvalidTargetDirectory)?;
         ensure_disjoint(self.vault.paths.root(), root.canonical_path())?;
         let now = UtcTimestamp::now();
-        let adapter_id = adapter_id()?;
+        let adapter_id = request
+            .adapter_id
+            .as_deref()
+            .map_or_else(adapter_id, |value| parse_id(value, "Adapter"))?;
+        if !crate::adapters::is_known(&adapter_id) {
+            return Err(DeploymentError::TargetMissing);
+        }
         let (scope, project_id, project_kind) = match request.kind {
             FixtureTargetKindDto::Global => ("global".to_owned(), None, None),
             FixtureTargetKindDto::GitProject | FixtureTargetKindDto::PersonalProject => {
@@ -396,7 +450,8 @@ impl DeploymentService {
                     .targets(MAX_DEPLOYMENTS)?
                     .into_iter()
                     .find(|target| {
-                        target.scope == "project"
+                        target.adapter_id == adapter_id
+                            && target.scope == "project"
                             && target.canonical_root_path == root.canonical_path()
                             && target.project_id.is_some()
                     });
@@ -448,12 +503,25 @@ impl DeploymentService {
             root_path: selected,
             canonical_root_path: root.canonical_path().to_path_buf(),
             project_id,
-            is_override: false,
+            is_override: request.is_override.unwrap_or(false),
             is_custom: false,
             created_at: now,
             updated_at: now,
         };
         self.vault.repositories.upsert_target(target.clone())?;
+        let identity = root.identity();
+        self.vault
+            .repositories
+            .upsert_target_registration_metadata(TargetRegistrationMetadataRecord {
+                target_id: target.id,
+                display_name: format!("{} {}", target.adapter_id, target.scope),
+                preferred_mode: None,
+                root_device_id: identity.device_id,
+                root_file_id: identity.file_id,
+                override_kind: target.is_override.then(|| "fixture".to_owned()),
+                created_at: now,
+                updated_at: now,
+            })?;
         let project = project_kind.map(|kind| ProjectRecord {
             id: project_id.expect("project kind has project ID"),
             workspace_root_id: None,
@@ -468,20 +536,325 @@ impl DeploymentService {
         target_view(&target, project.as_ref())
     }
 
-    pub fn targets(&self) -> Result<Vec<TargetView>, DeploymentError> {
+    pub fn adapters_configured_list(&self) -> Result<Vec<ConfiguredAdapterView>, DeploymentError> {
+        let configured = self.vault.repositories.adapter_configurations()?;
+        Ok(crate::adapters::DESCRIPTORS
+            .into_iter()
+            .map(|descriptor| {
+                let row = configured
+                    .iter()
+                    .find(|row| row.adapter_name == descriptor.name);
+                ConfiguredAdapterView {
+                    adapter_id: descriptor.id().to_string(),
+                    display_name: descriptor.display_name.to_owned(),
+                    enabled: row.is_none_or(|r| r.enabled),
+                    global_override_path: row
+                        .and_then(|r| r.global_override_path.as_ref())
+                        .map(|p| p.to_string_lossy().into_owned()),
+                    project_override_path: row.and_then(|r| r.project_override_path.clone()),
+                }
+            })
+            .collect())
+    }
+
+    pub fn configure_adapter(
+        &self,
+        request: &AdapterConfigureRequest,
+    ) -> Result<ConfiguredAdapterView, DeploymentError> {
+        let id = parse_id::<AdapterId>(&request.adapter_id, "Adapter")?;
+        let descriptor = crate::adapters::descriptor(&id).ok_or(DeploymentError::TargetMissing)?;
+        let project_override = request
+            .project_override_path
+            .as_deref()
+            .map(BundleRelativePath::parse)
+            .transpose()
+            .map_err(|_| DeploymentError::InvalidTargetDirectory)?
+            .map(|p| p.to_string());
+        let now = UtcTimestamp::now();
+        let global_override = if let Some(path) = &request.global_override_path {
+            let root =
+                AuthorizedRoot::open(path).map_err(|_| DeploymentError::InvalidTargetDirectory)?;
+            ensure_disjoint(self.vault.paths.root(), root.canonical_path())?;
+            let mut target = self
+                .vault
+                .repositories
+                .target_by_identity(id.clone(), "global".into(), None, root.canonical_path())?
+                .unwrap_or(TargetRecord {
+                    id: TargetId::generate(),
+                    adapter_id: id.clone(),
+                    scope: "global".into(),
+                    root_path: PathBuf::from(path),
+                    canonical_root_path: root.canonical_path().to_path_buf(),
+                    project_id: None,
+                    is_override: true,
+                    is_custom: false,
+                    created_at: now,
+                    updated_at: now,
+                });
+            target.root_path = PathBuf::from(path);
+            target.canonical_root_path = root.canonical_path().to_path_buf();
+            target.is_override = true;
+            target.updated_at = now;
+            self.vault.repositories.upsert_target(target.clone())?;
+            let identity = root.identity();
+            self.vault
+                .repositories
+                .upsert_target_registration_metadata(TargetRegistrationMetadataRecord {
+                    target_id: target.id,
+                    display_name: format!("{} override", descriptor.display_name),
+                    preferred_mode: None,
+                    root_device_id: identity.device_id,
+                    root_file_id: identity.file_id,
+                    override_kind: Some("global".into()),
+                    created_at: now,
+                    updated_at: now,
+                })?;
+            Some(root.canonical_path().to_path_buf())
+        } else {
+            None
+        };
         self.vault
             .repositories
-            .targets(MAX_DEPLOYMENTS)?
-            .iter()
-            .map(|target| {
-                let project = target
-                    .project_id
-                    .map(|id| self.vault.repositories.project(id))
-                    .transpose()?
-                    .flatten();
-                target_view(target, project.as_ref())
+            .upsert_adapter_configuration(AdapterConfigurationRecord {
+                adapter_name: descriptor.name.into(),
+                adapter_id: id,
+                enabled: request.enabled,
+                global_override_path: global_override.clone(),
+                project_override_path: project_override.clone(),
+                created_at: now,
+                updated_at: now,
+            })?;
+        Ok(ConfiguredAdapterView {
+            adapter_id: request.adapter_id.clone(),
+            display_name: descriptor.display_name.into(),
+            enabled: request.enabled,
+            global_override_path: global_override.map(|p| p.to_string_lossy().into_owned()),
+            project_override_path: project_override,
+        })
+    }
+
+    #[allow(clippy::too_many_lines)]
+    pub fn register_custom_target(
+        &self,
+        request: &CustomTargetRegisterRequest,
+    ) -> Result<TargetView, DeploymentError> {
+        let display = request.display_name.trim();
+        if display.is_empty() {
+            return Err(DeploymentError::InvalidTargetDirectory);
+        }
+        let root = AuthorizedRoot::open(&request.selected_directory)
+            .map_err(|_| DeploymentError::InvalidTargetDirectory)?;
+        ensure_disjoint(self.vault.paths.root(), root.canonical_path())?;
+        let project_id = request
+            .project_id
+            .as_deref()
+            .map(|v| parse_id::<ProjectId>(v, "Project"))
+            .transpose()?;
+        if let Some(id) = project_id {
+            self.vault
+                .repositories
+                .project(id)?
+                .ok_or(DeploymentError::TargetMissing)?;
+        }
+        let scope = match request.scope {
+            CustomTargetScope::Global => "global",
+            CustomTargetScope::Project => "project",
+        };
+        if scope == "global" && project_id.is_some() {
+            return Err(DeploymentError::TargetMissing);
+        }
+        let adapter_id = AdapterId::new("custom-directory", 1).expect("static adapter");
+        let now = UtcTimestamp::now();
+        let reselected = if let Some(value) = request.target_id.as_deref() {
+            let id = parse_id::<TargetId>(value, "Target")?;
+            Some(
+                self.vault
+                    .repositories
+                    .target(id)?
+                    .ok_or(DeploymentError::TargetMissing)?,
+            )
+        } else {
+            None
+        };
+        if reselected
+            .as_ref()
+            .is_some_and(|target| !target.is_custom || target.adapter_id != adapter_id)
+        {
+            return Err(DeploymentError::TargetMissing);
+        }
+        let mut target = if let Some(mut target) = reselected {
+            target.scope = scope.into();
+            target.project_id = project_id;
+            target
+        } else {
+            let existing = self.vault.repositories.target_by_identity(
+                adapter_id.clone(),
+                scope.into(),
+                project_id,
+                root.canonical_path(),
+            )?;
+            if let Some(existing) = &existing {
+                let metadata = self
+                    .vault
+                    .repositories
+                    .target_registration_metadata(existing.id)?
+                    .ok_or(DeploymentError::TargetMissing)?;
+                let identity = root.identity();
+                if identity.device_id != metadata.root_device_id
+                    || identity.file_id != metadata.root_file_id
+                {
+                    return Err(DeploymentError::TargetMissing);
+                }
+            }
+            existing.unwrap_or(TargetRecord {
+                id: TargetId::generate(),
+                adapter_id,
+                scope: scope.into(),
+                root_path: PathBuf::from(&request.selected_directory),
+                canonical_root_path: root.canonical_path().to_path_buf(),
+                project_id,
+                is_override: false,
+                is_custom: true,
+                created_at: now,
+                updated_at: now,
             })
-            .collect()
+        };
+        target.root_path = PathBuf::from(&request.selected_directory);
+        target.canonical_root_path = root.canonical_path().to_path_buf();
+        target.updated_at = now;
+        self.vault.repositories.upsert_target(target.clone())?;
+        let identity = root.identity();
+        self.vault
+            .repositories
+            .upsert_target_registration_metadata(TargetRegistrationMetadataRecord {
+                target_id: target.id,
+                display_name: display.into(),
+                preferred_mode: Some(mode(request.preferred_mode)),
+                root_device_id: identity.device_id,
+                root_file_id: identity.file_id,
+                override_kind: None,
+                created_at: now,
+                updated_at: now,
+            })?;
+        let project = project_id
+            .map(|id| self.vault.repositories.project(id))
+            .transpose()?
+            .flatten();
+        Ok(target_view_with_mode(
+            &target,
+            project.as_ref(),
+            mode(request.preferred_mode),
+        ))
+    }
+
+    pub fn register_adapter_project_target(
+        &self,
+        request: &AdapterProjectTargetRegisterRequest,
+    ) -> Result<TargetView, DeploymentError> {
+        let adapter_id = parse_id::<AdapterId>(&request.adapter_id, "Adapter")?;
+        let descriptor =
+            crate::adapters::descriptor(&adapter_id).ok_or(DeploymentError::TargetMissing)?;
+        let project_id = parse_id::<ProjectId>(&request.project_id, "Project")?;
+        let project = self
+            .vault
+            .repositories
+            .project(project_id)?
+            .ok_or(DeploymentError::TargetMissing)?;
+        let configuration = self
+            .vault
+            .repositories
+            .adapter_configurations()?
+            .into_iter()
+            .find(|row| row.adapter_name == descriptor.name);
+        if configuration.as_ref().is_some_and(|row| !row.enabled) {
+            return Err(DeploymentError::TargetMissing);
+        }
+        let (relative, is_override) = configuration
+            .and_then(|row| row.project_override_path)
+            .map_or_else(
+                || (descriptor.project_path.to_owned(), false),
+                |path| (path, true),
+            );
+        let relative = BundleRelativePath::parse(&relative)
+            .map_err(|_| DeploymentError::InvalidTargetDirectory)?;
+        let selected = project.canonical_path.join(relative.as_str());
+        let root =
+            AuthorizedRoot::open(&selected).map_err(|_| DeploymentError::InvalidTargetDirectory)?;
+        ensure_disjoint(self.vault.paths.root(), root.canonical_path())?;
+        let now = UtcTimestamp::now();
+        let mut target = self
+            .vault
+            .repositories
+            .target_by_identity(
+                adapter_id.clone(),
+                "project".into(),
+                Some(project_id),
+                root.canonical_path(),
+            )?
+            .unwrap_or(TargetRecord {
+                id: TargetId::generate(),
+                adapter_id,
+                scope: "project".into(),
+                root_path: selected.clone(),
+                canonical_root_path: root.canonical_path().to_path_buf(),
+                project_id: Some(project_id),
+                is_override,
+                is_custom: false,
+                created_at: now,
+                updated_at: now,
+            });
+        target.root_path = selected;
+        target.canonical_root_path = root.canonical_path().to_path_buf();
+        target.is_override = is_override;
+        target.updated_at = now;
+        self.vault.repositories.upsert_target(target.clone())?;
+        let identity = root.identity();
+        self.vault
+            .repositories
+            .upsert_target_registration_metadata(TargetRegistrationMetadataRecord {
+                target_id: target.id,
+                display_name: format!(
+                    "{} — {}",
+                    descriptor.display_name,
+                    project.root_path.display()
+                ),
+                preferred_mode: None,
+                root_device_id: identity.device_id,
+                root_file_id: identity.file_id,
+                override_kind: is_override.then(|| "project".into()),
+                created_at: now,
+                updated_at: now,
+            })?;
+        target_view(&target, Some(&project))
+    }
+
+    pub fn targets(&self) -> Result<Vec<TargetView>, DeploymentError> {
+        let mut views = Vec::new();
+        for target in self.vault.repositories.targets(MAX_DEPLOYMENTS)? {
+            match ensure_target_is_configured(&self.vault.repositories, &target) {
+                Ok(()) => {}
+                Err(DeploymentError::TargetMissing) => continue,
+                Err(error) => return Err(error),
+            }
+            let project = target
+                .project_id
+                .map(|id| self.vault.repositories.project(id))
+                .transpose()?
+                .flatten();
+            let view = if target.is_custom {
+                let preferred_mode = self
+                    .vault
+                    .repositories
+                    .target_registration_metadata(target.id)?
+                    .and_then(|metadata| metadata.preferred_mode)
+                    .ok_or(DeploymentError::TargetMissing)?;
+                target_view_with_mode(&target, project.as_ref(), preferred_mode)
+            } else {
+                target_view(&target, project.as_ref())?
+            };
+            views.push(view);
+        }
+        Ok(views)
     }
 
     #[allow(clippy::too_many_lines)]
@@ -507,6 +880,19 @@ impl DeploymentService {
             .filter(|skill| skill.lifecycle == SkillLifecycle::Active)
             .ok_or(DeploymentError::SkillMissing)?;
         let (target, project, root) = self.open_target(target_id)?;
+        ensure_target_is_configured(&self.vault.repositories, &target)?;
+        if !target.is_custom {
+            let enabled = self
+                .vault
+                .repositories
+                .adapter_configurations()?
+                .into_iter()
+                .find(|row| row.adapter_id == target.adapter_id)
+                .is_none_or(|row| row.enabled);
+            if !enabled {
+                return Err(DeploymentError::TargetMissing);
+            }
+        }
         let working = self.vault.paths.root().join(skill.working_path.as_str());
         let current = hash_bundle(&working, BundleCaps::default())
             .map_err(|error| DeploymentError::DriftBlocked(error.to_string()))?;
@@ -526,7 +912,15 @@ impl DeploymentService {
             .capability_probe
             .inspect(root.canonical_path(), &working)?;
         require_base_capability(&capability)?;
-        let default = default_mode(&target, project.as_ref())?;
+        let default = if target.is_custom {
+            self.vault
+                .repositories
+                .target_registration_metadata(target.id)?
+                .and_then(|metadata| metadata.preferred_mode)
+                .ok_or(DeploymentError::TargetMissing)?
+        } else {
+            default_mode(&target, project.as_ref())?
+        };
         let requested = request.requested_mode.map_or(default, mode);
         let (resolved, fallback_reason) = resolve_mode(requested, &capability)?;
         let relative = BundleRelativePath::parse(skill.deployment_name.as_str())
@@ -1225,6 +1619,16 @@ impl DeploymentService {
         if Path::new(vault_root) != self.vault.paths.root() {
             return Err(DeploymentError::TargetMissing);
         }
+        if stored.journal.state == OperationState::Planned {
+            for target in &targets {
+                let current = self
+                    .vault
+                    .repositories
+                    .target(target.target_id)?
+                    .ok_or(DeploymentError::TargetMissing)?;
+                ensure_target_is_configured(&self.vault.repositories, &current)?;
+            }
+        }
         let mut roots = TargetRoots::new();
         for target in targets {
             let target_root = AuthorizedRoot::open(&target.target_root)
@@ -1486,7 +1890,7 @@ impl DeploymentService {
             .repositories
             .target(id)?
             .ok_or(DeploymentError::TargetMissing)?;
-        if target.adapter_id != adapter_id()? || target.is_custom {
+        if !target.is_custom && !crate::adapters::is_known(&target.adapter_id) {
             return Err(DeploymentError::TargetMissing);
         }
         let project = target
@@ -1495,7 +1899,7 @@ impl DeploymentService {
             .transpose()?
             .flatten();
         if (target.scope == "global" && project.is_some())
-            || (target.scope == "project" && project.is_none())
+            || (target.scope == "project" && project.is_none() && !target.is_custom)
             || !matches!(target.scope.as_str(), "global" | "project")
         {
             return Err(DeploymentError::TargetMissing);
@@ -1504,6 +1908,18 @@ impl DeploymentService {
             AuthorizedRoot::open(&target.root_path).map_err(|_| DeploymentError::TargetMissing)?;
         if root.canonical_path() != target.canonical_root_path {
             return Err(DeploymentError::TargetMissing);
+        }
+        if let Some(metadata) = self
+            .vault
+            .repositories
+            .target_registration_metadata(target.id)?
+        {
+            let identity = root.identity();
+            if identity.device_id != metadata.root_device_id
+                || identity.file_id != metadata.root_file_id
+            {
+                return Err(DeploymentError::TargetMissing);
+            }
         }
         ensure_disjoint(self.vault.paths.root(), root.canonical_path())?;
         Ok((target, project, root))
@@ -3130,6 +3546,9 @@ fn default_mode(
     target: &TargetRecord,
     project: Option<&ProjectRecord>,
 ) -> Result<DeploymentMode, DeploymentError> {
+    if target.is_custom {
+        return Ok(DeploymentMode::Symlink);
+    }
     match (target.scope.as_str(), project) {
         ("global", None) => Ok(DeploymentMode::Symlink),
         ("project", Some(project)) if project.git_classification == "git" => {
@@ -3142,11 +3561,96 @@ fn default_mode(
     }
 }
 
+pub(crate) fn configured_override_matches(
+    repositories: &Repositories,
+    adapter_id: &AdapterId,
+    scope: &str,
+    project_id: Option<ProjectId>,
+    canonical_root: &Path,
+) -> Result<bool, DeploymentError> {
+    let Some(descriptor) = crate::adapters::descriptor(adapter_id) else {
+        return if crate::adapters::DESCRIPTORS
+            .into_iter()
+            .any(|known| known.name == adapter_id.name())
+        {
+            Err(DeploymentError::TargetMissing)
+        } else {
+            Ok(false)
+        };
+    };
+    let configuration = repositories
+        .adapter_configurations()?
+        .into_iter()
+        .find(|row| row.adapter_name == descriptor.name);
+    let Some(configuration) = configuration else {
+        return Ok(false);
+    };
+    if !configuration.enabled || configuration.adapter_id != *adapter_id {
+        return Err(DeploymentError::TargetMissing);
+    }
+    match scope {
+        "global" => Ok(configuration
+            .global_override_path
+            .is_some_and(|root| root == canonical_root)),
+        "project" => {
+            let Some(relative) = configuration.project_override_path else {
+                return Ok(false);
+            };
+            let project = project_id
+                .map(|id| repositories.project(id))
+                .transpose()?
+                .flatten()
+                .ok_or(DeploymentError::TargetMissing)?;
+            Ok(project.canonical_path.join(relative) == canonical_root)
+        }
+        _ => Err(DeploymentError::TargetMissing),
+    }
+}
+
+pub(crate) fn ensure_target_is_configured(
+    repositories: &Repositories,
+    target: &TargetRecord,
+) -> Result<(), DeploymentError> {
+    if target.is_custom {
+        return Ok(());
+    }
+    if crate::adapters::descriptor(&target.adapter_id).is_none()
+        && !crate::adapters::DESCRIPTORS
+            .into_iter()
+            .any(|known| known.name == target.adapter_id.name())
+    {
+        return Ok(());
+    }
+    let is_current_override = configured_override_matches(
+        repositories,
+        &target.adapter_id,
+        &target.scope,
+        target.project_id,
+        &target.canonical_root_path,
+    )?;
+    match (target.is_override, is_current_override) {
+        (true, true) | (false, _) => Ok(()),
+        (true, false) => Err(DeploymentError::TargetMissing),
+    }
+}
+
 fn target_view(
     target: &TargetRecord,
     project: Option<&ProjectRecord>,
 ) -> Result<TargetView, DeploymentError> {
-    Ok(TargetView {
+    Ok(target_view_with_mode(
+        target,
+        project,
+        default_mode(target, project)?,
+    ))
+}
+
+fn target_view_with_mode(
+    target: &TargetRecord,
+    project: Option<&ProjectRecord>,
+    default_mode: DeploymentMode,
+) -> TargetView {
+    TargetView {
         target_id: target.id.to_string(),
         adapter_id: target.adapter_id.to_string(),
         scope: target.scope.clone(),
@@ -3155,8 +3659,8 @@ fn target_view(
         root_path: target.root_path.to_string_lossy().into_owned(),
         is_override: target.is_override,
         is_custom: target.is_custom,
-        default_mode: mode_dto(default_mode(target, project)?),
-    })
+        default_mode: mode_dto(default_mode),
+    }
 }
 
 fn project_kind_text(kind: FixtureTargetKindDto) -> &'static str {
@@ -3482,6 +3986,8 @@ mod tests {
             .register_target(&RegisterTargetRequest {
                 kind,
                 selected_directory: root.to_string_lossy().into_owned(),
+                adapter_id: None,
+                is_override: None,
             })
             .unwrap()
     }
@@ -4306,6 +4812,8 @@ mod tests {
             fixture.service.register_target(&RegisterTargetRequest {
                 kind: FixtureTargetKindDto::Global,
                 selected_directory: inside.to_string_lossy().into_owned(),
+                adapter_id: None,
+                is_override: None,
             }),
             Err(DeploymentError::InvalidTargetDirectory)
         ));
@@ -4313,10 +4821,268 @@ mod tests {
             fixture.service.register_target(&RegisterTargetRequest {
                 kind: FixtureTargetKindDto::Global,
                 selected_directory: fixture.temporary.path().to_string_lossy().into_owned(),
+                adapter_id: None,
+                is_override: None,
             }),
             Err(DeploymentError::InvalidTargetDirectory)
         ));
         assert!(fixture.service.targets().unwrap().is_empty());
+    }
+
+    #[test]
+    fn all_six_families_use_the_same_global_git_and_personal_mode_defaults() {
+        let fixture = fixture();
+        for descriptor in crate::adapters::DESCRIPTORS {
+            for (suffix, kind, expected) in [
+                (
+                    "global",
+                    FixtureTargetKindDto::Global,
+                    DeploymentModeDto::Symlink,
+                ),
+                (
+                    "git",
+                    FixtureTargetKindDto::GitProject,
+                    DeploymentModeDto::ManagedCopy,
+                ),
+                (
+                    "personal",
+                    FixtureTargetKindDto::PersonalProject,
+                    DeploymentModeDto::Symlink,
+                ),
+            ] {
+                let root = fixture
+                    .temporary
+                    .path()
+                    .join(format!("{}-{suffix}", descriptor.name));
+                fs::create_dir(&root).unwrap();
+                let target = fixture
+                    .service
+                    .register_target(&RegisterTargetRequest {
+                        kind,
+                        selected_directory: root.to_string_lossy().into_owned(),
+                        adapter_id: Some(descriptor.id().to_string()),
+                        is_override: None,
+                    })
+                    .unwrap();
+                assert_eq!(target.default_mode, expected);
+                let reviewed = plan(&fixture, &target, None);
+                assert_eq!(
+                    reviewed.resolved_mode, expected,
+                    "{} {suffix}",
+                    descriptor.name
+                );
+                execute(&fixture, &reviewed);
+                assert_eq!(
+                    fixture
+                        .service
+                        .verify(&reviewed.deployment_id)
+                        .unwrap()
+                        .health,
+                    "clean",
+                    "{} {suffix}",
+                    descriptor.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn custom_target_replacement_blocks_planning_until_explicit_reselection() {
+        let fixture = fixture();
+        let root = fixture.temporary.path().join("custom-target");
+        fs::create_dir(&root).unwrap();
+        let mut request = CustomTargetRegisterRequest {
+            target_id: None,
+            display_name: "Custom project Skills".into(),
+            selected_directory: root.to_string_lossy().into_owned(),
+            scope: CustomTargetScope::Project,
+            preferred_mode: DeploymentModeDto::ManagedCopy,
+            project_id: None,
+        };
+        let target = fixture.service.register_custom_target(&request).unwrap();
+        assert_eq!(target.default_mode, DeploymentModeDto::ManagedCopy);
+        assert_eq!(
+            plan(&fixture, &target, None).resolved_mode,
+            DeploymentModeDto::ManagedCopy
+        );
+
+        fs::remove_dir(&root).unwrap();
+        fs::create_dir(&root).unwrap();
+        assert!(matches!(
+            fixture.service.plan_deployment(&DeploymentPlanRequest {
+                skill_id: fixture.skill_id.to_string(),
+                target_id: target.target_id.clone(),
+                requested_mode: None,
+            }),
+            Err(DeploymentError::TargetMissing)
+        ));
+        assert!(matches!(
+            fixture.service.register_custom_target(&request),
+            Err(DeploymentError::TargetMissing)
+        ));
+
+        request.target_id = Some(target.target_id.clone());
+        let reselected = fixture.service.register_custom_target(&request).unwrap();
+        assert_eq!(reselected.target_id, target.target_id);
+        let reviewed = plan(&fixture, &reselected, None);
+        execute(&fixture, &reviewed);
+        assert!(Path::new(&reviewed.target_path).is_dir());
+    }
+
+    #[test]
+    fn adapter_disable_and_override_change_revoke_reviewed_target_authority() {
+        let fixture = fixture();
+        let first = fixture.temporary.path().join("configured-first");
+        let second = fixture.temporary.path().join("configured-second");
+        fs::create_dir(&first).unwrap();
+        fs::create_dir(&second).unwrap();
+        let adapter_id = crate::adapters::DESCRIPTORS[0].id().to_string();
+        fixture
+            .service
+            .configure_adapter(&AdapterConfigureRequest {
+                adapter_id: adapter_id.clone(),
+                enabled: true,
+                global_override_path: Some(first.to_string_lossy().into_owned()),
+                project_override_path: None,
+            })
+            .unwrap();
+        let stale = fixture
+            .service
+            .targets()
+            .unwrap()
+            .into_iter()
+            .find(|target| target.root_path == first.to_string_lossy())
+            .unwrap();
+        let reviewed = plan(&fixture, &stale, None);
+        fixture
+            .service
+            .configure_adapter(&AdapterConfigureRequest {
+                adapter_id: adapter_id.clone(),
+                enabled: true,
+                global_override_path: Some(second.to_string_lossy().into_owned()),
+                project_override_path: None,
+            })
+            .unwrap();
+        assert!(matches!(
+            fixture
+                .service
+                .execute_any_operation(&reviewed.operation_id, &reviewed.plan_digest),
+            Err(DeploymentError::TargetMissing)
+        ));
+        fixture
+            .service
+            .configure_adapter(&AdapterConfigureRequest {
+                adapter_id,
+                enabled: false,
+                global_override_path: Some(second.to_string_lossy().into_owned()),
+                project_override_path: None,
+            })
+            .unwrap();
+        assert!(matches!(
+            fixture.service.plan_deployment(&DeploymentPlanRequest {
+                skill_id: fixture.skill_id.to_string(),
+                target_id: stale.target_id,
+                requested_mode: None,
+            }),
+            Err(DeploymentError::TargetMissing)
+        ));
+    }
+
+    #[test]
+    fn configured_project_override_materializes_a_contained_adapter_target() {
+        let fixture = fixture();
+        let root = fixture.temporary.path().join("configured-project");
+        let target_root = root.join(".custom/skills");
+        fs::create_dir_all(&target_root).unwrap();
+        let root = root.canonicalize().unwrap();
+        let project_id = ProjectId::generate();
+        let now = UtcTimestamp::now();
+        fixture
+            .vault
+            .repositories
+            .upsert_project(ProjectRecord {
+                id: project_id,
+                workspace_root_id: None,
+                root_path: root.clone(),
+                canonical_path: root,
+                discovery_evidence: "test".into(),
+                git_classification: "git".into(),
+                manual: true,
+                created_at: now,
+                updated_at: now,
+            })
+            .unwrap();
+        let adapter_id = crate::adapters::DESCRIPTORS[1].id().to_string();
+        fixture
+            .service
+            .configure_adapter(&AdapterConfigureRequest {
+                adapter_id: adapter_id.clone(),
+                enabled: true,
+                global_override_path: None,
+                project_override_path: Some(".custom/skills".into()),
+            })
+            .unwrap();
+        let target = fixture
+            .service
+            .register_adapter_project_target(&AdapterProjectTargetRegisterRequest {
+                adapter_id,
+                project_id: project_id.to_string(),
+            })
+            .unwrap();
+        assert_eq!(
+            Path::new(&target.root_path),
+            target_root.canonicalize().unwrap()
+        );
+        assert!(target.is_override);
+        assert_eq!(target.default_mode, DeploymentModeDto::ManagedCopy);
+        assert!(
+            fixture
+                .service
+                .plan_deployment(&DeploymentPlanRequest {
+                    skill_id: fixture.skill_id.to_string(),
+                    target_id: target.target_id,
+                    requested_mode: None,
+                })
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn adapter_version_change_marks_deployment_unverified_without_rewriting_path() {
+        let fixture = fixture();
+        let target = target(&fixture, "versioned", FixtureTargetKindDto::GitProject);
+        let reviewed = plan(&fixture, &target, None);
+        execute(&fixture, &reviewed);
+        let deployment_id = DeploymentId::from_str(&reviewed.deployment_id).unwrap();
+        let before = fixture
+            .vault
+            .repositories
+            .deployment(deployment_id)
+            .unwrap()
+            .unwrap();
+        let mut bumped_target = fixture
+            .vault
+            .repositories
+            .target(TargetId::from_str(&target.target_id).unwrap())
+            .unwrap()
+            .unwrap();
+        bumped_target.adapter_id = AdapterId::new("universal-agent-skills", 2).unwrap();
+        fixture
+            .vault
+            .repositories
+            .upsert_target(bumped_target)
+            .unwrap();
+
+        let health = fixture.service.verify(&reviewed.deployment_id).unwrap();
+        let after = fixture
+            .vault
+            .repositories
+            .deployment(deployment_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(health.health, "unverified");
+        assert_eq!(after.target_path, before.target_path);
+        assert_eq!(after.adapter_version, before.adapter_version);
     }
 
     #[test]

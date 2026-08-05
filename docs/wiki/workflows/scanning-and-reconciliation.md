@@ -12,11 +12,13 @@ timestamp: 2026-07-23T00:00:00Z
 
 Scanning can read metadata and bytes only inside an authorized coverage boundary. It cannot create directories, fix links, copy Skills, claim ownership, or delete stale paths. A scan result explicitly says “No files were changed.”
 
-# Implemented M0-004 slice
+# Implemented M0-004/M0-010/M0-011 slices
 
-The Universal global-root path is implemented for `~/.agents/skills`: Rust performs immediate-child inspection, Bundle validation/hashing, managed and unknown link classification, cancellation, progress, durable per-root run/diagnostic/observation projection, and complete-coverage-only stale reconciliation. Missing, inaccessible, invalid, unsupported, unstable, and link-error candidates remain visible instead of becoming false absences. Duplicate active requests for the same root reuse the current job.
+The generic global-root path is implemented for all six verified adapters, enabled default roots, global overrides, and custom global targets. Rust performs immediate-child inspection, Bundle validation/hashing, managed and unknown link classification, cancellation, progress, durable per-root run/diagnostic/observation projection, and complete-coverage-only stale reconciliation. Missing, inaccessible, invalid, unsupported, unstable, and link-error candidates remain visible instead of becoming false absences. Duplicate active requests for the same configured source reuse the current job. Project-scoped custom targets remain in manual-project/Workspace discovery so their observations are not misclassified as global.
 
-The external Library read model groups exact digest duplicates and preserves name conflicts, degraded locations, filtering, stable pagination, and Rust-provided next actions. Typed scan start/get/cancel and Library-list commands emit `scan-progress` and `domain-invalidated` events. Workspace traversal, watchers, other built-in adapters, and custom targets remain planned in `M0-010`/`M0-011`; their contracts below are not implementation claims.
+The external Library read model groups exact digest duplicates and preserves name conflicts, degraded locations, filtering, stable pagination, and Rust-provided next actions. Typed scan start/all/get/cancel and Library-list commands emit `scan-progress` and `domain-invalidated` events.
+
+M0-010 implements persisted Workspace Root authorization and stable filesystem identity, bounded hidden/ignore-aware traversal, nested Git and implicit adapter project discovery, standalone and Workspace-owned manual projects, nearest project association, progressive `workspace-project-batch` events, and per-source coverage diagnostics. Partial or canceled batches are positive evidence only; only a terminal complete result can establish absence. A narrow `notify` backend coalesces path events into invalidations and drives real targeted or bounded rescans on startup, focus resume, periodic wake fallback, overflow, disconnect, root replacement, and operation completion/rollback. Watch registration and reconciliation failures remain queued for retry. Scanning and watching never mutate user content or independently change ownership/health.
 
 # Scan sources
 

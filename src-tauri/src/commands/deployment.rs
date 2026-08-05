@@ -4,9 +4,11 @@ use tauri::State;
 
 use crate::{
     application::deployment::{
-        BatchDeploymentPlanRequest, BatchDeploymentPlanView, DeploymentHealthView,
-        DeploymentIdRequest, DeploymentPage, DeploymentPlanRequest, DeploymentPlanView,
-        DeploymentQuery, RegisterTargetRequest, TargetView, UndeployPlanRequest,
+        AdapterConfigureRequest, AdapterProjectTargetRegisterRequest, BatchDeploymentPlanRequest,
+        BatchDeploymentPlanView, ConfiguredAdapterView, CustomTargetRegisterRequest,
+        DeploymentHealthView, DeploymentIdRequest, DeploymentPage, DeploymentPlanRequest,
+        DeploymentPlanView, DeploymentQuery, RegisterTargetRequest, TargetView,
+        UndeployPlanRequest,
     },
     error::AppErrorView,
     runtime::AppRuntime,
@@ -49,6 +51,57 @@ pub async fn target_register_fixture(
         .run_blocking(move || service.register_target(&request))
         .await?
         .map_err(AppErrorView::from)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn adapters_configured_list(
+    runtime: State<'_, AppRuntime>,
+) -> Result<Vec<ConfiguredAdapterView>, AppErrorView> {
+    let service = runtime.deployment_service()?;
+    runtime
+        .run_blocking(move || service.adapters_configured_list())
+        .await?
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn adapter_configure(
+    runtime: State<'_, AppRuntime>,
+    request: AdapterConfigureRequest,
+) -> Result<ConfiguredAdapterView, AppErrorView> {
+    let service = runtime.deployment_service()?;
+    runtime
+        .run_blocking(move || service.configure_adapter(&request))
+        .await?
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn custom_target_register(
+    runtime: State<'_, AppRuntime>,
+    request: CustomTargetRegisterRequest,
+) -> Result<TargetView, AppErrorView> {
+    let service = runtime.deployment_service()?;
+    runtime
+        .run_blocking(move || service.register_custom_target(&request))
+        .await?
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn adapter_project_target_register(
+    runtime: State<'_, AppRuntime>,
+    request: AdapterProjectTargetRegisterRequest,
+) -> Result<TargetView, AppErrorView> {
+    let service = runtime.deployment_service()?;
+    runtime
+        .run_blocking(move || service.register_adapter_project_target(&request))
+        .await?
+        .map_err(Into::into)
 }
 
 #[tauri::command]
