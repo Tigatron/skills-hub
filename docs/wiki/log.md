@@ -2,6 +2,8 @@
 
 ## 2026-08-05
 
+* **Acceptance**: Closed `M0-011` as `Complete (2026-08-05)` and checked it off in the M0 roadmap after the combined gate passed: 228 Rust tests passed with 3 intentional crash-helper ignores, strict Clippy passed with warnings denied, generated bindings matched Rust commands, and all OKF links/frontmatter validated.
+
 * **Implementation**: Completed `M0-010` with persisted Workspace Root authorization and filesystem identity; bounded hidden/ignore-aware read-only traversal; nested Git, implicit-adapter, and manual project discovery; nearest-project observation ownership; progressive safe project batches; complete-coverage-only absence; per-source diagnostics; and a live retrying `notify` invalidation/reconciliation driver for startup, resume/wake, overflow/disconnect, root replacement, and operation completion/rollback. Typed commands and generated bindings cover Workspace lifecycle and manual-project rescan.
 
 * **Implementation**: Completed `M0-012` Vault lifecycle backend and acceptance evidence: no-overwrite external-edit reconciliation, exact-path read-only verify, conservative reviewed repair, manifest/journal index rebuild with retained backup, reference-aware two-phase GC, capability-gated relocation with managed-link repair, startup lifecycle recovery evidence, and separately confirmed old-Vault cleanup. Index rebuild and relocation intentionally require restart so live handles stay attached to the retained recovery source until reopening.

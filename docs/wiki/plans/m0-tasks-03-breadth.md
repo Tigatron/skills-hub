@@ -67,7 +67,7 @@ Implemented on 2026-08-05 as a read-only Rust-owned Workspace scanner and reconc
 
 | Field | Value |
 | --- | --- |
-| Status | Implemented |
+| Status | Complete (2026-08-05) |
 | Dependencies | M0-004, M0-007 |
 | PRD coverage | SCN-01/02, DPL-01/02/03/04/09 |
 | Design | [Target adapters](../interfaces/target-adapters.md), [Scanning and reconciliation](../workflows/scanning-and-reconciliation.md), [Takeover and deployment](../workflows/takeover-and-deployment.md) |
@@ -113,7 +113,7 @@ Upstream path conventions may change between verification and release; the recor
 
 ## Implementation evidence
 
-Implemented on 2026-08-05 through the existing generic scanner and Operation kernel. Six versioned descriptors carry current official-source evidence; persisted adapter configuration controls enablement and safe global/project overrides; configured global scans cover defaults, overrides, and custom global targets independently; and custom registration records display/scope/mode/project metadata plus canonical filesystem identity. Deployment planning applies the same family-independent mode defaults and post-commit verifier, while changed adapter-version evidence returns `Unverified` without rewriting the recorded target path. Generated bindings expose descriptor/configuration, scan-all, override, and custom-target commands. Automated matrices cover descriptor identity/path serialization, six-root no-write scanning, disable/override/custom/re-enable breadth, all-family global/Git/personal mode defaults, custom root replacement and explicit reselection, and adapter-version invalidation.
+Completed on 2026-08-05 through the existing generic scanner and Operation kernel. Six versioned descriptors carry current official-source evidence; persisted adapter configuration controls enablement and safe global/project overrides; configured global scans cover defaults, overrides, and custom global targets independently; and custom registration records display/scope/mode/project metadata plus canonical filesystem identity. Deployment planning applies the same family-independent mode defaults and post-commit verifier, while changed adapter-version evidence returns `Unverified` without rewriting the recorded target path. Generated bindings expose descriptor/configuration, scan-all, override, and custom-target commands. Automated matrices cover descriptor identity/path serialization, six-root no-write scanning, disable/override/custom/re-enable breadth, all-family global/Git/personal mode defaults and post-commit verification, custom root replacement and explicit reselection, stale takeover authority refusal, and adapter-version invalidation. Acceptance re-review passed the full 231-test Rust suite (228 passed, 3 intentionally ignored), strict Clippy, generated binding check, and OKF documentation check.
 
 # M0-012 — Implement Vault lifecycle: watch, verify, repair, relocate, rebuild, and GC
 
