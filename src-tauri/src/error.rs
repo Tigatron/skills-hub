@@ -10,7 +10,8 @@ use crate::{
         takeover::TakeoverError,
     },
     operations::OperationError,
-    runtime::{BlockingWorkError, RuntimeStateError},
+    persistence::VaultError,
+    runtime::{BlockingWorkError, RuntimeStateError, VaultInitializationError},
 };
 
 #[derive(Debug, Clone, Copy, Serialize, Type)]
@@ -74,10 +75,88 @@ impl From<RuntimeStateError> for AppErrorView {
                 retryable: false,
                 recovery_action: Some("initialize_vault".to_owned()),
             },
+            RuntimeStateError::VaultAlreadyInitialized => app_error(
+                AppErrorCode::InvalidInput,
+                "Vault already initialized",
+                "A Vault is already active for this application session.",
+                false,
+                None,
+            ),
+            RuntimeStateError::StatePoisoned => app_error(
+                AppErrorCode::Internal,
+                "Vault services unavailable",
+                "Skills Hub could not access its runtime Vault services.",
+                true,
+                Some("restart_app"),
+            ),
             RuntimeStateError::StartupRecoveryFailed => app_error(
                 AppErrorCode::RecoveryRequired, "Startup recovery failed",
                 "Skills Hub could not establish authoritative operation state.", false,
                 Some("inspect_recovery"),
+            ),
+        }
+    }
+}
+
+impl From<VaultInitializationError> for AppErrorView {
+    fn from(error: VaultInitializationError) -> Self {
+        match error {
+            VaultInitializationError::Runtime(error) => error.into(),
+            VaultInitializationError::Vault(error) => error.into(),
+            VaultInitializationError::OperationStore(error) => app_error(
+                AppErrorCode::RecoveryRequired,
+                "Vault operation evidence unavailable",
+                error.to_string(),
+                false,
+                Some("inspect_vault"),
+            ),
+        }
+    }
+}
+
+impl From<VaultError> for AppErrorView {
+    fn from(error: VaultError) -> Self {
+        match error {
+            VaultError::PathNotAbsolute
+            | VaultError::NoExistingAncestor
+            | VaultError::SettingsInsideVault
+            | VaultError::VaultInsideTarget { .. }
+            | VaultError::TargetInsideManager { .. }
+            | VaultError::PathAlias { .. }
+            | VaultError::LayoutConflict { .. } => app_error(
+                AppErrorCode::UnsafePath,
+                "Unsafe Vault location",
+                error.to_string(),
+                false,
+                Some("choose_vault_location"),
+            ),
+            VaultError::AlreadyOpen | VaultError::Lock(_) => app_error(
+                AppErrorCode::OperationBusy,
+                "Vault is already open",
+                error.to_string(),
+                true,
+                Some("close_other_instance"),
+            ),
+            VaultError::Manifest(_) => app_error(
+                AppErrorCode::VerificationFailed,
+                "Vault metadata is invalid",
+                error.to_string(),
+                false,
+                Some("inspect_vault"),
+            ),
+            VaultError::Database(_) => app_error(
+                AppErrorCode::DatabaseFailure,
+                "Vault database unavailable",
+                error.to_string(),
+                true,
+                Some("retry"),
+            ),
+            VaultError::Io(_) | VaultError::LockMetadata(_) => app_error(
+                AppErrorCode::IoFailure,
+                "Vault initialization failed",
+                error.to_string(),
+                true,
+                Some("retry"),
             ),
         }
     }

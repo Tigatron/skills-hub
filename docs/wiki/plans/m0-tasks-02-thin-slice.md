@@ -275,7 +275,7 @@ This is the highest-risk M0 task. Do not begin broad adapter/UI work on unverifi
 
 | Field | Value |
 | --- | --- |
-| Status | Planned |
+| Status | Complete (2026-08-05) |
 | Dependencies | M0-004, M0-006, M0-007, M0-008 |
 | PRD coverage | VLT-01, IMP-02/03, DPL-05/10/11; first-run and basic Library/Deployments/Activity scope |
 | Design | [Tauri/UI contract](../interfaces/tauri-and-ui-state.md), [System context](../architecture/system-context.md), [Testing](../quality/testing-and-acceptance.md) |
@@ -311,6 +311,14 @@ This is the highest-risk M0 task. Do not begin broad adapter/UI work on unverifi
 - Query invalidation/refetch tests.
 - Keyboard/focus tests and one macOS Tauri smoke script.
 - Long-name/path and incomplete-scan rendering tests.
+
+## Implementation evidence
+
+- Bootstrap exposes Vault initialization status; `vault_initialize` / `vault_status` open the default or selected Vault, install scan/takeover/deployment/Activity services, and run startup recovery before mutation access.
+- Thin-slice React shell uses generated bindings + TanStack Query only. First-run Vault screen, Library (scan/takeover/deploy plans), Deployments (fixture targets, verify, undeploy plans), and Activity list/detail are real command surfaces with no optimistic ownership or success.
+- Plan review remains visible during execute/cancel. Operation outcomes and recovery references stay inspectable. Scan coverage surfaces “No files were changed.”
+- React Aria buttons/lists provide keyboard focus; layout targets 900×600. Component tests cover first-run init, Library empty state, and navigation.
+- Completion gate: `pnpm check` (format, lint/clippy, typecheck, frontend+Rust tests, bindings, docs, renderer build). Breadth UI, six adapters, Workspace, Trash, and polish remain later tasks.
 
 ## Risks and recovery
 

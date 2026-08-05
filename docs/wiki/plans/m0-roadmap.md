@@ -37,7 +37,7 @@ M0-004 Scanner ✓ M0-005 Operation kernel ✓
        M0-008 Recovery + Activity ✓
           │
           ▼
-       M0-009 Thin-slice UI                 ◀── first end-to-end gate
+       M0-009 Thin-slice UI ✓               ◀── first end-to-end gate
 
 M0-004 ───────────────▶ M0-010 Workspaces + watchers
 M0-004 + M0-007 ──────▶ M0-011 Six adapters + custom targets

@@ -9,6 +9,8 @@ pub(crate) fn builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new()
         .commands(collect_commands![
             crate::commands::bootstrap::bootstrap_get_state,
+            crate::commands::bootstrap::vault_initialize,
+            crate::commands::bootstrap::vault_status,
             crate::commands::bootstrap::startup_recovery_run,
             crate::commands::bootstrap::startup_recovery_status,
             crate::commands::scanning::scan_start,

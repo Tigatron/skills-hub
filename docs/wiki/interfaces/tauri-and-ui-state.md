@@ -34,6 +34,16 @@ Generated bindings add `target_register_fixture`, `targets_list`, `deployment_pl
 
 Generated bindings add `batch_deployment_plan`, `deployment_undo_plan`, `startup_recovery_run`, `startup_recovery_status`, `activity_list`, and `activity_detail`. Batch mutation input is one Skill ID plus 2–20 Target ID/requested-mode choices; inverse input is only the completed Operation ID. Generic execute/get dispatch now returns distinct typed single or batch Operation views. Startup recovery evidence and bounded Activity list/detail—including typed actual path/mode, failure step/code, plan/journal links, and recovery references—remain Rust-authoritative. Startup recovery runs while opening the configured Vault and blocks later mutation/scan service access if a nonterminal Operation remains unresolved.
 
+
+# M0-009 implementation evidence
+
+`vault_initialize` and `vault_status` complete the first-run Vault seam. The thin-slice renderer consumes generated commands for scan, library, takeover, deployment, undeploy, and Activity through TanStack Query. Bootstrap reports `vaultInitialized` / `vaultPath`. Events invalidate queries; the UI never optimistically changes ownership or declares Operation success.
+
+
+# M0-009 backend bootstrap evidence
+
+Generated bindings add `vault_status` and `vault_initialize`. Status reports the active canonical Vault path, default path, and startup-recovery completion without creating files. Initialization accepts an optional absolute selected directory (or uses the default), validates it through the existing Vault safety contract, installs scan/takeover/deployment/Activity services into the live runtime, and runs startup recovery before those services become available. A second initialization in the same process is rejected. `bootstrap_get_state` includes Vault initialization/path fields so first render can branch without inferring filesystem state.
+
 # Command groups
 
 Names are provisional but their responsibility is stable:
@@ -42,6 +52,7 @@ Names are provisional but their responsibility is stable:
 
 ```text
 bootstrap_get_state() -> BootstrapState
+vault_status() -> VaultStatusView
 vault_initialize(InitializeVaultRequest) -> VaultSummary
 vault_plan_relocate(RelocateVaultRequest) -> OperationPlanView
 vault_verify() -> JobRef

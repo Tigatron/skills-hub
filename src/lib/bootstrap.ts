@@ -1,21 +1,7 @@
-import { commands, type AppErrorView, type BootstrapState } from '../bindings';
+import { api } from './api';
 
-export class BootstrapCommandError extends Error {
-  readonly details: AppErrorView;
+export { CommandError as BootstrapCommandError } from './api';
 
-  constructor(details: AppErrorView) {
-    super(details.message);
-    this.name = 'BootstrapCommandError';
-    this.details = details;
-  }
-}
-
-export async function getBootstrapState(): Promise<BootstrapState> {
-  const result = await commands.bootstrapGetState();
-
-  if (result.status === 'error') {
-    throw new BootstrapCommandError(result.error);
-  }
-
-  return result.data;
+export async function getBootstrapState() {
+  return api.bootstrapGetState();
 }

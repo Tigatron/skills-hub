@@ -16,6 +16,22 @@ async bootstrapGetState() : Promise<Result<BootstrapState, AppErrorView>> {
     else return { status: "error", error: e  as any };
 }
 },
+async vaultInitialize(request: InitializeVaultRequest) : Promise<Result<VaultSummary, AppErrorView>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("vault_initialize", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async vaultStatus() : Promise<Result<VaultStatusView, AppErrorView>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("vault_status") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async startupRecoveryRun() : Promise<Result<StartupRecoveryReport, AppErrorView>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("startup_recovery_run") };
@@ -244,7 +260,7 @@ export type BatchDeploymentOperationView = { operationId: string; planDigest: st
 export type BatchDeploymentPlanRequest = { skillId: string; targets: BatchDeploymentTargetChoice[] }
 export type BatchDeploymentPlanView = { operationId: string; planDigest: string; expiresAt: string; action: string; skillId: string; entries: DeploymentPlanView[]; recoveryCount: number; consequence: string }
 export type BatchDeploymentTargetChoice = { targetId: string; requestedMode: DeploymentModeDto | null }
-export type BootstrapState = { appName: string; appVersion: string; bundleIdentifier: string; contractVersion: number; implementationStage: string; runtimeStatus: RuntimeStatus; blockingWorkerLimit: number; platform: PlatformSummary }
+export type BootstrapState = { appName: string; appVersion: string; bundleIdentifier: string; contractVersion: number; implementationStage: string; vaultInitialized: boolean; vaultPath: string | null; runtimeStatus: RuntimeStatus; blockingWorkerLimit: number; platform: PlatformSummary }
 export type CancelResult = { jobId: string; accepted: boolean }
 export type DeploymentHealthView = { deploymentId: string; skillId: string; targetId: string; deploymentName: string; targetPath: string; mode: DeploymentModeDto; active: boolean; health: string; explanation: string; expectedDigest: string; vaultDigest: string | null; targetDigest: string | null; expectedLinkTarget: string | null; actualLinkTarget: string | null; driftDirection: string; allowedActions: string[]; disabledReason: string | null; verifiedAt: string }
 export type DeploymentIdRequest = { deploymentId: string }
@@ -258,6 +274,7 @@ export type DomainInvalidated = { revision: number; scopes: string[]; ids: strin
 export type DuplicateSummary = { exactDuplicateLocations: number; nameConflicts: number; probableDuplicatesOrRenames: number; unverified: boolean }
 export type ExecuteOperationRequest = { operationId: string; planDigest: string }
 export type FixtureTargetKindDto = "global" | "git_project" | "personal_project"
+export type InitializeVaultRequest = { selectedDirectory: string | null }
 export type JobRef = { jobId: string }
 export type KeepExternalRequest = { observationId: string }
 export type KeepExternalResult = { observationId: string; keptExternal: boolean }
@@ -299,6 +316,8 @@ export type TargetView = { targetId: string; adapterId: string; scope: string; p
 export type TextPreview = { skillId: string; relativePath: string; size: number; content: string }
 export type UndeployPlanRequest = { deploymentId: string; resolution: UndeployResolutionDto }
 export type UndeployResolutionDto = "remove_managed" | "preserve_target" | "cancel"
+export type VaultStatusView = { initialized: boolean; rootPath: string | null; defaultPath: string; startupRecoveryCompleted: boolean | null }
+export type VaultSummary = { rootPath: string; initialized: boolean; vaultId: string }
 
 /** tauri-specta globals **/
 

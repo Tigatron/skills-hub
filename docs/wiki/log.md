@@ -2,6 +2,9 @@
 
 ## 2026-08-05
 
+* **Implementation**: Completed `M0-009` thin-slice UI on real Rust commands. Added post-launch `vault_initialize`/`vault_status`, first-run Vault screen, Library scan/takeover/deploy plan review, Deployments fixture targets/verify/undeploy, and Activity list/detail with recovery evidence. TanStack Query invalidation follows `domain-invalidated`; no optimistic ownership. Keyboard-capable React Aria shell at 900×600. `pnpm check` passes. Breadth adapters/Workspace/Trash remain `M0-010`+.
+
+* **Implementation**: Added the `M0-009` backend bootstrap slice: a live runtime can initialize a default or selected safe Vault after launch, atomically install scan/takeover/deployment/Activity services, run startup recovery, and expose typed Vault status/summary commands plus bootstrap Vault fields. Reinitialization is rejected, existing configured-Vault startup remains supported, generated bindings are current, and focused/full Rust tests cover before/after status, service availability, default initialization, and unsafe paths. The React thin-slice UI remains separate and M0-009 is not complete.
 * **Implementation**: Completed `M0-008` after gate repair (Clippy `-D warnings`, Specta `u32` Activity diagnostic count, binding regeneration). Schema-v4 2–20 Target batch deploy with stage-all/reverse compensation, operation-level Snapshot protection, runtime startup recovery action driving that blocks mutation/scan until nonterminal journals resolve, bounded Activity list/detail with journal rebuild, and reviewed inverse undo that refuses drifted postconditions. Real-tree failpoint, 3/20-target, undo, startup driver/classifier, and scan Activity tests pass with the full `pnpm check` gate. Thin-slice UI remains `M0-009`.
 
 ## 2026-07-24
