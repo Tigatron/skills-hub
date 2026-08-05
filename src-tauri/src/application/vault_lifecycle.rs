@@ -28,6 +28,7 @@ use crate::{
         ManifestError, ManifestStore, ObjectRecord, OpenVault, OperationRecord, Repositories,
         RepositoryError, SkillManifest, SkillManifestSource, SkillRecord, SkillRevisionRecord,
         SkillSourceRecord, SourceConfidence, TargetRecord, replace_database_file,
+        update_active_vault_path,
     },
 };
 
@@ -1057,8 +1058,9 @@ impl VaultLifecycleService {
             let settings_path = self.settings_path()?;
             let old_settings: DeviceSettings = read_settings(&settings_path)?;
             if old_settings.active_vault_path != self.vault.paths.root() { return Err(LifecycleError::StalePlan); }
-            let mut new_settings = old_settings.clone();
-            new_settings.active_vault_path.clone_from(&destination);
+            let application_support = settings_path
+                .parent()
+                .ok_or_else(|| LifecycleError::Durability("settings path has no parent".into()))?;
             lifecycle_journal.steps.push(LifecycleStepEvidence {
                 order: 1, action: "switch_settings".into(), source: Some(settings_path.clone()),
                 destination: Some(destination.clone()), intent_persisted: true,
@@ -1070,7 +1072,13 @@ impl VaultLifecycleService {
                 &lifecycle_journal,
             )?;
             self.checkpoint(LifecycleBoundary::SettingsIntentPersisted)?;
-            write_settings(&settings_path, &new_settings)?;
+            if !update_active_vault_path(
+                application_support,
+                self.vault.paths.root(),
+                &destination,
+            )? {
+                return Err(LifecycleError::StalePlan);
+            }
             if read_settings(&settings_path)?.active_vault_path != destination {
                 return Err(LifecycleError::CutoverFailed("settings verification failed".into()));
             }
@@ -1092,7 +1100,11 @@ impl VaultLifecycleService {
                 Ok(value) => value,
                 Err((error, changed)) => {
                     for (target, old_link, _) in changed.iter().rev() { let _ = replace_symlink(target, old_link); }
-                    let _ = write_settings(&settings_path, &old_settings);
+                    let _ = update_active_vault_path(
+                        application_support,
+                        &destination,
+                        self.vault.paths.root(),
+                    );
                     let compensated = serde_json::json!({
                         "operationId": operation_id, "planDigest": digest, "state": "failed_compensated",
                         "authority": plan.old_vault_path, "destinationVerified": true,
@@ -2485,9 +2497,6 @@ fn durable_json<T: Serialize>(path: &Path, value: &T) -> Result<(), LifecycleErr
 }
 fn read_settings(path: &Path) -> Result<DeviceSettings, LifecycleError> {
     Ok(serde_json::from_slice(&fs::read(path)?)?)
-}
-fn write_settings(path: &Path, settings: &DeviceSettings) -> Result<(), LifecycleError> {
-    durable_json(path, settings)
 }
 fn relocation_digest(plan: &VaultRelocatePlan) -> Result<String, LifecycleError> {
     let mut p = plan.clone();

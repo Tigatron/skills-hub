@@ -79,6 +79,8 @@ Add authorized Workspace discovery, watcher reconciliation, all six adapters, cu
 
 Stress path safety, crashes, permissions, stale plans, failure compensation, accessibility, reference-scale performance, and all 12 PRD acceptance criteria. Package a reproducible macOS release candidate and document any manual/platform verification that cannot be automated.
 
+`M0-015` is complete: the consolidated fault/cleanup gate, local provenance recovery, safe error envelopes, and bounded local diagnostics pass the repository-wide check. `M0-016` and `M0-017` retain accessibility, measured performance, final acceptance, and packaging ownership.
+
 # Parallelization
 
 After the thin-slice contracts are stable:

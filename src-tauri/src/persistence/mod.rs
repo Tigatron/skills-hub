@@ -26,3 +26,4 @@ pub use vault::{
     OpenVault, VaultError, VaultPaths, default_application_support, default_vault_path,
     existing_device_settings,
 };
+pub(crate) use vault::{update_active_vault_path, update_debug_logging};

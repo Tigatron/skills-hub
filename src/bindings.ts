@@ -48,6 +48,38 @@ async startupRecoveryStatus() : Promise<Result<StartupRecoveryReport, AppErrorVi
     else return { status: "error", error: e  as any };
 }
 },
+async diagnosticsStatus() : Promise<Result<DiagnosticsStatus, AppErrorView>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("diagnostics_status") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async diagnosticsDebugSet(request: DebugRequest) : Promise<Result<DiagnosticsStatus, AppErrorView>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("diagnostics_debug_set", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async diagnosticsExportPrepare() : Promise<Result<DiagnosticsExport, AppErrorView>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("diagnostics_export_prepare") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async diagnosticsExportSave(request: SaveRequest) : Promise<Result<DiagnosticsSaveResult, AppErrorView>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("diagnostics_export_save", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 /**
  * Starts the configured Universal global scan without mutating its source root.
  */
@@ -598,6 +630,7 @@ export type CapabilityStatus = "supported" | "unsupported" | "unknown"
 export type ConfiguredAdapterView = { adapterId: string; displayName: string; enabled: boolean; globalOverridePath: string | null; projectOverridePath: string | null }
 export type CustomTargetRegisterRequest = { targetId: string | null; displayName: string; selectedDirectory: string; scope: CustomTargetScope; preferredMode: DeploymentModeDto; projectId: string | null }
 export type CustomTargetScope = "global" | "project"
+export type DebugRequest = { enabled: boolean }
 export type DeploymentHealthView = { deploymentId: string; skillId: string; targetId: string; deploymentName: string; targetPath: string; mode: DeploymentModeDto; active: boolean; health: string; explanation: string; expectedDigest: string; vaultDigest: string | null; targetDigest: string | null; expectedLinkTarget: string | null; actualLinkTarget: string | null; driftDirection: string; allowedActions: string[]; disabledReason: string | null; verifiedAt: string }
 export type DeploymentIdRequest = { deploymentId: string }
 export type DeploymentModeDto = "symlink" | "managed_copy"
@@ -607,6 +640,9 @@ export type DeploymentPlanRequest = { skillId: string; targetId: string; request
 export type DeploymentPlanView = { operationId: string; planDigest: string; expiresAt: string; action: string; skillId: string; targetId: string; deploymentId: string; targetPath: string; requestedMode: DeploymentModeDto; resolvedMode: DeploymentModeDto; fallbackReason: string | null; reviewedHealth: string; noOp: boolean; consequence: string; recoveryCount: number; executionAllowed: boolean }
 export type DeploymentQuery = { skillId: string | null; targetId: string | null; includeInactive: boolean; limit: number }
 export type DestinationCapabilityReport = { status: CapabilityStatus; writeFile: boolean; createDirectory: boolean; symlink: boolean; executableBit: boolean; atomicRename: boolean; fileFsync: boolean; directoryFsync: boolean; advisoryLock: boolean; caseSensitive: boolean; availableBytes: string | null; requiredBytes: string; blockers: string[] }
+export type DiagnosticsExport = { exportId: string; sha256: string; recordCount: number; skippedCount: number; byteCount: string; preview: string; expiresAt: string }
+export type DiagnosticsSaveResult = { sha256: string; byteCount: string }
+export type DiagnosticsStatus = { available: boolean; debugLogging: boolean; blocked: boolean; level: string; health: string; managedBytes: string; segmentCount: number; droppedRecordCount: string }
 export type DomainInvalidated = { revision: number; scopes: string[]; ids: string[] }
 export type DuplicateSummary = { exactDuplicateLocations: number; nameConflicts: number; probableDuplicatesOrRenames: number; unverified: boolean }
 export type ExecuteLifecycleRequest = { operationId: string; planDigest: string }
@@ -650,6 +686,7 @@ export type PlatformSummary = { os: string; arch: string; minimumSupportedOs: st
 export type ReconcileResult = { skillId: string; workingPath: string; previousDigest: string; workingDigest: string; changed: boolean; deploymentsMarkedVaultAhead: number }
 export type RegisterTargetRequest = { kind: FixtureTargetKindDto; selectedDirectory: string; adapterId: string | null; isOverride: boolean | null }
 export type RuntimeStatus = "ready"
+export type SaveRequest = { exportId: string; expectedSha256: string; destinationPath: string }
 export type ScanCoverageView = { state: string; complete: boolean; noFilesChanged: boolean }
 export type ScanDiagnosticView = { path: string; code: string; summary: string }
 export type ScanProgress = { jobId: string; phase: string; completedEntries: number; estimatedEntries: number; currentDisplayPath: string | null }

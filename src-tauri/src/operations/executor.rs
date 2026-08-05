@@ -401,6 +401,9 @@ impl OperationExecutor {
         plan_digest: PlanDigest,
         cancellation: &CancellationToken,
     ) -> Result<OperationExecution, OperationError> {
+        let operation_span = crate::diagnostics::operation_span(&operation_id.to_string());
+        let _operation_guard = operation_span.enter();
+        tracing::info!(target: "skills_hub::operation", event_code = "operation_execute_started");
         let _guard = self.coordinator.acquire()?;
         let mut stored = self.store.load(operation_id)?;
         if stored.plan.plan_digest != plan_digest {
@@ -580,6 +583,10 @@ impl OperationExecutor {
         if !stored.journal.cleanup_failures.is_empty() {
             self.store.write_journal(&stored.journal)?;
         }
+        tracing::info!(
+            target: "skills_hub::operation",
+            event_code = "operation_execute_succeeded"
+        );
         terminal_execution(&stored, false)
     }
 
@@ -591,6 +598,9 @@ impl OperationExecutor {
     /// Returns a typed error when recovery rolls back the Operation, requires review, or cannot
     /// durably complete. The resulting journal remains the source of truth in every case.
     pub fn recover(&self, operation_id: OperationId) -> Result<OperationExecution, OperationError> {
+        let operation_span = crate::diagnostics::operation_span(&operation_id.to_string());
+        let _operation_guard = operation_span.enter();
+        tracing::info!(target: "skills_hub::operation", event_code = "operation_recovery_started");
         let _guard = self.coordinator.acquire()?;
         let mut stored = self.store.load(operation_id)?;
         if stored.journal.state.is_terminal() {

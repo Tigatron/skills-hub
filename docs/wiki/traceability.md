@@ -11,7 +11,7 @@ timestamp: 2026-07-23T00:00:00Z
 
 Each row maps one [PRD v0.1](../PRD-v0.1.md) M0 requirement to the design concepts that own its contract, the tasks that implement it, and where its verification evidence is gated. Task IDs `M0-001`–`M0-017` are defined once each in the [foundation](plans/m0-tasks-01-foundation.md), [thin-slice](plans/m0-tasks-02-thin-slice.md), [breadth](plans/m0-tasks-03-breadth.md), and [release](plans/m0-tasks-04-release.md) pages; the delivery order lives in the [roadmap](plans/m0-roadmap.md). Detailed acceptance evidence definitions live in [testing and acceptance](quality/testing-and-acceptance.md); this page maps ownership and does not restate them.
 
-Every mutation-bearing requirement additionally passes the consolidated hardening gate in `M0-015` and the final acceptance sweep in `M0-017`; the Verification column names only the primary evidence owner.
+Every mutation-bearing requirement additionally passes the consolidated hardening gate in `M0-015` and the final acceptance sweep in `M0-017`; the Verification column names only the primary evidence owner. `M0-015` also implements the architecture-wide local diagnostic contract—bounded retention, fail-closed redaction, Operation correlation, and reviewed export—but diagnostic logs do not replace requirement-owned Activity or recovery evidence.
 
 # Vault and indexing (VLT)
 

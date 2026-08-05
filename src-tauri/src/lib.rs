@@ -4,6 +4,7 @@ mod adapters;
 mod application;
 mod bindings;
 mod commands;
+mod diagnostics;
 pub mod domain;
 mod error;
 pub mod filesystem;

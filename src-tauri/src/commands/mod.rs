@@ -4,6 +4,7 @@
 pub(crate) mod activity;
 pub(crate) mod bootstrap;
 pub(crate) mod deployment;
+pub(crate) mod diagnostics;
 pub(crate) mod scanning;
 pub(crate) mod takeover;
 pub(crate) mod trash;

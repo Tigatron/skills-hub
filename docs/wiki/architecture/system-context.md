@@ -112,6 +112,8 @@ M0 requires macOS 14 Sonoma. Source remains compatible with Apple Silicon and In
 
 Structured `tracing` logs stay local with bounded rolling retention (25 MB or seven days, whichever limit is reached first), `info` by default and debug only by opt-in. Records correlate Operation IDs and redact home/absolute paths where possible; they never contain Skill content, tokens, environment values, or credentials. M0 sends no telemetry or crash uploads. Diagnostic export is user-initiated and previewed. Activity, recovery journals, and diagnostic logs remain separate stores with separate purposes.
 
+M0-015 implements this as a first-party-target-only subscriber under application support. Storage and export are no-follow and descriptor-bound; persisted records are reconstructed through a strict fail-closed redaction schema before preview. Prepare returns immutable bytes plus a digest and short-lived export ID; save requires that digest and never overwrites an existing destination. Debug preference and Vault relocation share one locked device-settings read/modify/write path so either update preserves unrelated fields.
+
 # Extension seams, not pre-implementations
 
 - `SourceProvider` can be introduced beside local observations in M1 without changing Skill identity.

@@ -10,10 +10,41 @@ use crate::{
         takeover::TakeoverError, trash::TrashError, vault_lifecycle::LifecycleError,
         workspaces::WorkspaceError,
     },
+    diagnostics::DiagnosticsError,
     operations::OperationError,
     persistence::VaultError,
     runtime::{BlockingWorkError, RuntimeStateError, VaultInitializationError},
 };
+
+impl From<DiagnosticsError> for AppErrorView {
+    fn from(error: DiagnosticsError) -> Self {
+        match error {
+            DiagnosticsError::InvalidExport
+            | DiagnosticsError::DigestMismatch
+            | DiagnosticsError::InvalidDestination => app_error(
+                AppErrorCode::InvalidInput,
+                "Diagnostic export unavailable",
+                "The reviewed diagnostic export is invalid, expired, changed, or the selected destination already exists.",
+                false,
+                Some("prepare_diagnostics_export"),
+            ),
+            DiagnosticsError::ForeignEntry => app_error(
+                AppErrorCode::VerificationFailed,
+                "Diagnostics storage blocked",
+                "An unowned entry is present in diagnostics storage. Skills Hub preserved it and stopped writing diagnostics.",
+                false,
+                Some("inspect_diagnostics_storage"),
+            ),
+            DiagnosticsError::Unavailable | DiagnosticsError::Io(_) => app_error(
+                AppErrorCode::IoFailure,
+                "Diagnostics unavailable",
+                "Local diagnostics are currently unavailable. No Activity or operation evidence was changed.",
+                true,
+                Some("retry"),
+            ),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Type)]
 #[serde(rename_all = "snake_case")]
@@ -694,5 +725,23 @@ mod tests {
         let value = serde_json::to_value(error).unwrap();
         assert_eq!(value["code"], "internal");
         assert_eq!(value["recoveryAction"], "retry");
+    }
+
+    #[test]
+    fn diagnostics_errors_have_safe_stable_codes_and_next_actions() {
+        let unavailable: AppErrorView = DiagnosticsError::Io(std::io::Error::other(
+            "secret at /Users/private/Skill/SKILL.md",
+        ))
+        .into();
+        assert!(matches!(unavailable.code, AppErrorCode::IoFailure));
+        assert_eq!(unavailable.recovery_action.as_deref(), Some("retry"));
+        assert!(!unavailable.message.contains("/Users/private"));
+
+        let blocked: AppErrorView = DiagnosticsError::ForeignEntry.into();
+        assert!(matches!(blocked.code, AppErrorCode::VerificationFailed));
+        assert_eq!(
+            blocked.recovery_action.as_deref(),
+            Some("inspect_diagnostics_storage")
+        );
     }
 }

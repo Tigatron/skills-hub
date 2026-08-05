@@ -46,6 +46,10 @@ Generated bindings add `vault_status` and `vault_initialize`. Status reports the
 
 `vault_initialize` is the accepted bootstrap exception to the normal Operation Plan requirement: before a Vault exists there is no durable manager location in which to persist a reviewed plan, journal, or recovery point. The first-run UI therefore requires two explicit user steps. Review names the exact selected path and explains that ordinary working directories plus `.manager` index, manifest, journal, snapshot, and recovery structure will be created; a separate confirmation performs initialization. Initialization does not scan, import, deploy, overwrite, or delete existing Skills, and Rust remains responsible for path validation and the mutation outcome.
 
+# M0-015 diagnostics evidence
+
+Generated bindings expose `diagnostics_status`, `diagnostics_debug_set`, `diagnostics_export_prepare`, and `diagnostics_export_save`. Status reports availability, blocked health, current level, bounded managed-byte/segment counts, and dropped-record count without exposing the diagnostics path. Debug opt-in is persisted device-locally. Prepare returns a redacted preview, exact byte/record/skipped counts, digest, and short-lived export ID; save requires that ID and digest plus an absolute user-selected new destination. The frontend cannot submit diagnostic records, bypass review, overwrite a destination, or infer Activity/Operation outcomes from logs.
+
 # Command groups
 
 Names are provisional but their responsibility is stable:

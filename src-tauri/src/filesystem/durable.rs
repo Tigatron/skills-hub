@@ -6,8 +6,141 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use rustix::fs::{RenameFlags, renameat_with};
 use thiserror::Error;
 use uuid::Uuid;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct OwnedDirectoryIdentity {
+    device: u64,
+    inode: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct OwnedFileIdentity {
+    device: u64,
+    inode: u64,
+}
+
+/// Captures no-follow identity for one application-created directory.
+pub(crate) fn owned_directory_identity(path: &Path) -> io::Result<OwnedDirectoryIdentity> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(io::Error::other("owned path is not a real directory"));
+    }
+    Ok(OwnedDirectoryIdentity {
+        device: metadata.dev(),
+        inode: metadata.ino(),
+    })
+}
+
+/// Captures regular-file identity from the same no-follow metadata used for ownership decisions.
+pub(crate) fn owned_file_identity_from_metadata(
+    metadata: &fs::Metadata,
+) -> io::Result<OwnedFileIdentity> {
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(io::Error::other("owned path is not a regular file"));
+    }
+    Ok(OwnedFileIdentity {
+        device: metadata.dev(),
+        inode: metadata.ino(),
+    })
+}
+
+impl OwnedFileIdentity {
+    pub(crate) fn matches(self, metadata: &fs::Metadata) -> bool {
+        metadata.is_file()
+            && !metadata.file_type().is_symlink()
+            && metadata.dev() == self.device
+            && metadata.ino() == self.inode
+    }
+}
+
+impl OwnedDirectoryIdentity {
+    pub(crate) fn matches(self, metadata: &fs::Metadata) -> bool {
+        metadata.is_dir()
+            && !metadata.file_type().is_symlink()
+            && metadata.dev() == self.device
+            && metadata.ino() == self.inode
+    }
+}
+
+/// Removes an application-created directory only after moving and revalidating its exact inode.
+///
+/// Returns `false` without deleting when the original path is absent or no longer has the captured
+/// identity. A raced replacement moved during cleanup is restored when possible and otherwise left
+/// in the quarantine path; neither mismatch is recursively removed.
+pub(crate) fn remove_owned_directory(
+    path: &Path,
+    identity: OwnedDirectoryIdentity,
+) -> io::Result<bool> {
+    remove_owned_directory_with(path, identity, || Ok(()))
+}
+
+fn remove_owned_directory_with<F>(
+    path: &Path,
+    identity: OwnedDirectoryIdentity,
+    before_rename: F,
+) -> io::Result<bool>
+where
+    F: FnOnce() -> io::Result<()>,
+{
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if matches_directory_identity(&metadata, identity) => {}
+        Ok(_) => return Ok(false),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error),
+    }
+    before_rename()?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| io::Error::other("owned directory has no parent"))?;
+    let name = path
+        .file_name()
+        .ok_or_else(|| io::Error::other("owned directory has no name"))?;
+    let quarantine = parent.join(format!(
+        ".{}.cleanup-{}",
+        name.to_string_lossy(),
+        Uuid::now_v7()
+    ));
+    let parent_directory = File::open(parent)?;
+    renameat_with(
+        &parent_directory,
+        name,
+        &parent_directory,
+        quarantine
+            .file_name()
+            .ok_or_else(|| io::Error::other("cleanup quarantine has no name"))?,
+        RenameFlags::NOREPLACE,
+    )
+    .map_err(io::Error::from)?;
+    parent_directory.sync_all()?;
+
+    let matches = fs::symlink_metadata(&quarantine)
+        .is_ok_and(|metadata| matches_directory_identity(&metadata, identity));
+    if !matches {
+        if fs::symlink_metadata(path).is_err() {
+            let _ = renameat_with(
+                &parent_directory,
+                quarantine
+                    .file_name()
+                    .ok_or_else(|| io::Error::other("cleanup quarantine has no name"))?,
+                &parent_directory,
+                name,
+                RenameFlags::NOREPLACE,
+            );
+            let _ = parent_directory.sync_all();
+        }
+        return Ok(false);
+    }
+    fs::remove_dir_all(&quarantine)?;
+    parent_directory.sync_all()?;
+    Ok(true)
+}
+
+fn matches_directory_identity(metadata: &fs::Metadata, identity: OwnedDirectoryIdentity) -> bool {
+    identity.matches(metadata)
+}
 
 /// Atomically replaces one file after flushing both its bytes and parent directory.
 ///
@@ -151,6 +284,27 @@ mod tests {
             fs::read(replacement.unwrap()).unwrap(),
             b"unrelated replacement"
         );
+    }
+
+    #[test]
+    fn owned_directory_cleanup_restores_a_raced_replacement_without_deleting_it() {
+        let directory = tempfile::tempdir().unwrap();
+        let owned = directory.path().join("owned-staging");
+        let displaced = directory.path().join("displaced-owned-staging");
+        fs::create_dir(&owned).unwrap();
+        fs::write(owned.join("owned"), b"owned").unwrap();
+        let identity = owned_directory_identity(&owned).unwrap();
+
+        let removed = remove_owned_directory_with(&owned, identity, || {
+            fs::rename(&owned, &displaced)?;
+            fs::create_dir(&owned)?;
+            fs::write(owned.join("replacement"), b"preserve")
+        })
+        .unwrap();
+
+        assert!(!removed);
+        assert_eq!(fs::read(owned.join("replacement")).unwrap(), b"preserve");
+        assert_eq!(fs::read(displaced.join("owned")).unwrap(), b"owned");
     }
 
     #[test]

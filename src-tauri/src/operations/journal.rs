@@ -11,7 +11,10 @@ use uuid::Uuid;
 
 use crate::{
     domain::{OperationId, OperationOutcome, OperationState, UtcTimestamp},
-    filesystem::durable::{DurableWriteError, atomic_write, sync_directory},
+    filesystem::durable::{
+        DurableWriteError, atomic_write, owned_directory_identity, remove_owned_directory,
+        sync_directory,
+    },
 };
 
 use super::{OperationPlan, PathFingerprint, PlanDigest};
@@ -115,6 +118,7 @@ impl OperationStore {
             Uuid::now_v7()
         ));
         fs::create_dir(&temporary)?;
+        let temporary_identity = owned_directory_identity(&temporary)?;
         sync_directory(&self.operations_root)?;
         let result: Result<StoredOperation, JournalError> = (|| {
             let steps_directory = temporary.join("steps");
@@ -147,8 +151,9 @@ impl OperationStore {
                 steps,
             })
         })();
-        if result.is_err() {
-            let _ = fs::remove_dir_all(&temporary);
+        if result.is_err()
+            && remove_owned_directory(&temporary, temporary_identity).unwrap_or(false)
+        {
             let _ = sync_directory(&self.operations_root);
         }
         let stored = result?;

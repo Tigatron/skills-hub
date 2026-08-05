@@ -179,6 +179,7 @@ impl OpenVault {
         };
 
         ensure_directory(application_support)?;
+        let _settings_lock = lock_device_settings(application_support)?;
         let settings_path = application_support.join("settings.json");
         let settings = if settings_path.exists() {
             match read_versioned::<DeviceSettings>(&settings_path) {
@@ -235,6 +236,70 @@ pub fn existing_device_settings(
     read_versioned(&path)
         .map(Some)
         .map_err(VaultError::Manifest)
+}
+
+/// Atomically updates the device-local debug logging preference without requiring a Vault.
+///
+/// # Errors
+///
+/// Returns an error when settings are absent, invalid, or cannot be durably replaced.
+pub(crate) fn update_debug_logging(
+    application_support: &Path,
+    enabled: bool,
+) -> Result<(), VaultError> {
+    mutate_device_settings(application_support, |settings| {
+        settings.debug_logging = enabled;
+        true
+    })
+    .map(|_| ())
+    .map_err(VaultError::Manifest)
+}
+
+/// Atomically changes only the active Vault path when its current value still matches review.
+/// Other settings fields are reread under the device-settings lock and preserved.
+///
+/// # Errors
+///
+/// Returns an error when settings cannot be locked, read, validated, or durably replaced.
+pub(crate) fn update_active_vault_path(
+    application_support: &Path,
+    expected: &Path,
+    replacement: &Path,
+) -> Result<bool, ManifestError> {
+    mutate_device_settings(application_support, |settings| {
+        if settings.active_vault_path != expected {
+            return false;
+        }
+        settings.active_vault_path = replacement.to_path_buf();
+        true
+    })
+}
+
+fn mutate_device_settings<F>(application_support: &Path, mutate: F) -> Result<bool, ManifestError>
+where
+    F: FnOnce(&mut DeviceSettings) -> bool,
+{
+    let _lock = lock_device_settings(application_support)?;
+    let path = application_support.join("settings.json");
+    let mut settings: DeviceSettings = read_versioned(&path)?;
+    if !mutate(&mut settings) {
+        return Ok(false);
+    }
+    write_versioned(&path, &settings)?;
+    Ok(true)
+}
+
+fn lock_device_settings(application_support: &Path) -> Result<File, ManifestError> {
+    let lock_path = application_support.join("settings.mutation.lock");
+    let lock = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(lock_path)
+        .map_err(ManifestError::Io)?;
+    lock.lock_exclusive().map_err(ManifestError::Io)?;
+    Ok(lock)
 }
 
 fn validate_nesting(
@@ -382,6 +447,7 @@ mod tests {
         domain::{BundleDigest, DeploymentName, SkillId},
         persistence::SkillManifest,
     };
+    use std::sync::{Arc, Barrier};
 
     #[test]
     fn default_path_matches_the_accepted_macos_location() {
@@ -389,6 +455,72 @@ mod tests {
             default_vault_path(Path::new("/Users/test")),
             Path::new("/Users/test/Library/Application Support/Skills Hub/Vault")
         );
+    }
+
+    #[test]
+    fn debug_logging_preference_is_durable_without_mutating_vault_content() {
+        let home = tempfile::tempdir().unwrap();
+        let application_support = default_application_support(home.path());
+        let vault = default_vault_path(home.path());
+        drop(OpenVault::open(&vault, &application_support, &[]).unwrap());
+
+        update_debug_logging(&application_support, true).unwrap();
+        let relocated = home.path().join("relocated-vault");
+        assert!(
+            update_active_vault_path(
+                &application_support,
+                &vault.canonicalize().unwrap(),
+                &relocated
+            )
+            .unwrap()
+        );
+
+        let settings = existing_device_settings(&application_support)
+            .unwrap()
+            .unwrap();
+        assert!(settings.debug_logging);
+        assert_eq!(settings.active_vault_path, relocated);
+        assert!(vault.join(".manager/vault.json").is_file());
+
+        update_debug_logging(&application_support, false).unwrap();
+        let settings = existing_device_settings(&application_support)
+            .unwrap()
+            .unwrap();
+        assert!(!settings.debug_logging);
+        assert_eq!(settings.active_vault_path, relocated);
+    }
+
+    #[test]
+    fn concurrent_vault_open_and_debug_update_preserve_both_settings() {
+        let home = tempfile::tempdir().unwrap();
+        let application_support = default_application_support(home.path());
+        let initial = home.path().join("initial-vault");
+        drop(OpenVault::open(&initial, &application_support, &[]).unwrap());
+        let selected = home.path().join("selected-vault");
+        let barrier = Arc::new(Barrier::new(3));
+
+        let open_barrier = Arc::clone(&barrier);
+        let open_support = application_support.clone();
+        let open_selected = selected.clone();
+        let open = std::thread::spawn(move || {
+            open_barrier.wait();
+            drop(OpenVault::open(&open_selected, &open_support, &[]).unwrap());
+        });
+        let debug_barrier = Arc::clone(&barrier);
+        let debug_support = application_support.clone();
+        let debug = std::thread::spawn(move || {
+            debug_barrier.wait();
+            update_debug_logging(&debug_support, true).unwrap();
+        });
+        barrier.wait();
+        open.join().unwrap();
+        debug.join().unwrap();
+
+        let settings = existing_device_settings(&application_support)
+            .unwrap()
+            .unwrap();
+        assert!(settings.debug_logging);
+        assert_eq!(settings.active_vault_path, selected.canonicalize().unwrap());
     }
 
     #[test]

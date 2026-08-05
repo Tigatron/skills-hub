@@ -12,7 +12,7 @@ use crate::domain::{BundleDigest, OperationId, UtcTimestamp};
 
 use super::{
     BundleCaps, BundleHashError, BundleStats, HashedBundle, MetadataFingerprint,
-    durable::{atomic_write, sync_directory},
+    durable::{atomic_write, owned_directory_identity, remove_owned_directory, sync_directory},
     hash_bundle, validate_bundle_symlinks,
 };
 
@@ -115,6 +115,26 @@ impl ObjectStore {
         expected_digest: Option<BundleDigest>,
         created_at: UtcTimestamp,
     ) -> Result<ObjectPublication, ObjectStoreError> {
+        self.publish_with_cleanup_hook(
+            operation_id,
+            source,
+            expected_digest,
+            created_at,
+            |_| Ok(()),
+        )
+    }
+
+    fn publish_with_cleanup_hook<F>(
+        &self,
+        operation_id: OperationId,
+        source: &Path,
+        expected_digest: Option<BundleDigest>,
+        created_at: UtcTimestamp,
+        before_cleanup: F,
+    ) -> Result<ObjectPublication, ObjectStoreError>
+    where
+        F: FnOnce(&Path) -> io::Result<()>,
+    {
         validate_bundle_symlinks(source, self.caps)?;
 
         let operation_staging = self
@@ -125,10 +145,11 @@ impl ObjectStore {
         sync_directory(&operation_staging)?;
         let staged_object = operation_staging.join(format!("{}.tmp", Uuid::now_v7()));
         fs::create_dir(&staged_object)?;
+        let staged_identity = owned_directory_identity(&staged_object)?;
 
         let result = self.publish_staged(source, &staged_object, expected_digest, created_at);
-        if staged_object.exists() {
-            let _ = fs::remove_dir_all(&staged_object);
+        before_cleanup(&staged_object)?;
+        if remove_owned_directory(&staged_object, staged_identity).unwrap_or(false) {
             let _ = sync_directory(&operation_staging);
         }
         result
@@ -600,6 +621,39 @@ mod tests {
             Err(ObjectStoreError::DigestMismatch { .. })
         ));
         assert!(!store.object_path(expected).exists());
+    }
+
+    #[test]
+    fn failed_publication_cleanup_never_deletes_a_staging_path_replacement() {
+        let root = tempfile::tempdir().unwrap();
+        let source = bundle(root.path(), "skill\n");
+        let store = store(root.path());
+        let displaced = root.path().join("displaced-object-staging");
+        let mut replacement = None;
+
+        let result = store.publish_with_cleanup_hook(
+            OperationId::generate(),
+            &source,
+            Some(BundleDigest::from_bytes([9; 32])),
+            UtcTimestamp::from_unix_millis(1_000).unwrap(),
+            |staging| {
+                fs::rename(staging, &displaced)?;
+                fs::create_dir(staging)?;
+                fs::write(staging.join("replacement"), b"preserve")?;
+                replacement = Some(staging.to_path_buf());
+                Ok(())
+            },
+        );
+
+        assert!(matches!(
+            result,
+            Err(ObjectStoreError::DigestMismatch { .. })
+        ));
+        assert_eq!(
+            fs::read(replacement.unwrap().join("replacement")).unwrap(),
+            b"preserve"
+        );
+        assert!(displaced.join("bundle/SKILL.md").is_file());
     }
 
     #[test]

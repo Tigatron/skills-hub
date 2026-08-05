@@ -26,10 +26,14 @@ use crate::{
         vault_lifecycle::{LifecycleRecoveryEvidence, VaultLifecycleService},
         workspaces::WorkspaceService,
     },
+    diagnostics::{
+        DiagnosticsError, DiagnosticsExport, DiagnosticsSaveResult, DiagnosticsService,
+        DiagnosticsStatus,
+    },
     operations::{OperationCoordinator, OperationStore},
     persistence::{
         OpenVault, VaultError, default_application_support, default_vault_path,
-        existing_device_settings,
+        existing_device_settings, update_debug_logging,
     },
     scanner::{NotifyBackend, ReconcileReason, WatchBackend, WatchCoordinator, WatchEvent},
 };
@@ -45,6 +49,7 @@ pub struct AppRuntime {
     workspace_gate: Arc<Mutex<()>>,
     services: Arc<Mutex<Option<RuntimeServices>>>,
     restart_required: Arc<AtomicBool>,
+    diagnostics: Result<DiagnosticsService, String>,
 }
 
 struct RuntimeServices {
@@ -60,10 +65,30 @@ struct RuntimeServices {
 impl AppRuntime {
     pub fn foundation() -> Self {
         let home = std::env::var_os("HOME").map(PathBuf::from);
-        Self::foundation_for_home(home)
+        let mut diagnostics = diagnostics_for_home(home.as_ref());
+        if let Some(service) = diagnostics.as_ref().ok().cloned() {
+            use tracing_subscriber::prelude::*;
+            if tracing::subscriber::set_global_default(
+                tracing_subscriber::registry().with(service.layer()),
+            )
+            .is_err()
+            {
+                diagnostics = Err("diagnostics subscriber unavailable".to_owned());
+            }
+        }
+        Self::foundation_with_diagnostics(home, diagnostics)
     }
 
+    #[cfg(test)]
     fn foundation_for_home(home: Option<PathBuf>) -> Self {
+        let diagnostics = diagnostics_for_home(home.as_ref());
+        Self::foundation_with_diagnostics(home, diagnostics)
+    }
+
+    fn foundation_with_diagnostics(
+        home: Option<PathBuf>,
+        diagnostics: Result<DiagnosticsService, String>,
+    ) -> Self {
         let blocking_work = BlockingWorkPool::new(DEFAULT_BLOCKING_WORKER_LIMIT);
         let active_vault = home
             .as_deref()
@@ -78,6 +103,7 @@ impl AppRuntime {
             workspace_gate: Arc::new(Mutex::new(())),
             services: Arc::new(Mutex::new(services)),
             restart_required: Arc::new(AtomicBool::new(false)),
+            diagnostics,
         };
         if let Ok(service) = runtime.workspace_service() {
             let _ = service.initialize_reconciliation();
@@ -155,7 +181,61 @@ impl AppRuntime {
         F: FnOnce() -> T + Send + 'static,
         T: Send + 'static,
     {
-        self.blocking_work.run(work)
+        let dispatcher = tracing::dispatcher::get_default(Clone::clone);
+        let span = tracing::Span::current();
+        self.blocking_work.run(move || {
+            tracing::dispatcher::with_default(&dispatcher, || {
+                let _guard = span.enter();
+                work()
+            })
+        })
+    }
+
+    pub(crate) fn diagnostics_status(&self) -> Result<DiagnosticsStatus, DiagnosticsError> {
+        match &self.diagnostics {
+            Ok(service) => service.status(),
+            Err(_) => Ok(DiagnosticsStatus {
+                available: false,
+                debug_logging: false,
+                blocked: false,
+                level: "unavailable".into(),
+                health: "unavailable".into(),
+                managed_bytes: "0".into(),
+                segment_count: 0,
+                dropped_record_count: "0".into(),
+            }),
+        }
+    }
+    pub(crate) fn diagnostics_debug_set(
+        &self,
+        enabled: bool,
+    ) -> Result<DiagnosticsStatus, DiagnosticsError> {
+        let service = self
+            .diagnostics
+            .as_ref()
+            .map_err(|_| DiagnosticsError::Unavailable)?;
+        let home = self.home.as_deref().ok_or(DiagnosticsError::Unavailable)?;
+        update_debug_logging(&default_application_support(home), enabled)
+            .map_err(|_| DiagnosticsError::Unavailable)?;
+        service.set_debug(enabled);
+        service.status()
+    }
+    pub(crate) fn diagnostics_export_prepare(&self) -> Result<DiagnosticsExport, DiagnosticsError> {
+        self.diagnostics
+            .as_ref()
+            .map_err(|_| DiagnosticsError::Unavailable)?
+            .prepare()
+    }
+    pub(crate) fn diagnostics_export_save(
+        &self,
+        id: &str,
+        digest: &str,
+        path: &Path,
+    ) -> Result<DiagnosticsSaveResult, DiagnosticsError> {
+        self.diagnostics
+            .as_ref()
+            .map_err(|_| DiagnosticsError::Unavailable)?
+            .save(id, digest, path)
     }
 
     pub(crate) fn scanning_service(&self) -> Result<ScanningService, RuntimeStateError> {
@@ -278,6 +358,7 @@ impl AppRuntime {
                 ticks = ticks.saturating_add(1);
                 if ticks >= 120 {
                     runtime.request_workspace_reconciliation(ReconcileReason::Wake);
+                    let _ = runtime.diagnostics_status();
                     ticks = 0;
                 }
                 let request = runtime
@@ -415,6 +496,9 @@ impl RuntimeServices {
             .map_err(|error| error.to_string())?;
         let mut operations = Vec::with_capacity(ids.len());
         for id in ids {
+            let operation_span = crate::diagnostics::operation_span(&id.to_string());
+            let _operation_guard = operation_span.enter();
+            tracing::info!(target: "skills_hub::recovery", "startup operation recovery began");
             let stored = store.load(id).map_err(|error| error.to_string())?;
             let result = match stored.plan.content.kind {
                 crate::operations::OperationKind::TakeOver => self
@@ -556,6 +640,21 @@ impl BlockingWorkPool {
     }
 }
 
+fn diagnostics_for_home(home: Option<&PathBuf>) -> Result<DiagnosticsService, String> {
+    home.filter(|path| path.is_absolute()).map_or_else(
+        || Err("home unavailable".to_owned()),
+        |home| {
+            let support = default_application_support(home);
+            let debug = existing_device_settings(&support)
+                .ok()
+                .flatten()
+                .is_some_and(|settings| settings.debug_logging);
+            DiagnosticsService::new(support.join("diagnostics"), Some(home.clone()), debug)
+                .map_err(|error| error.to_string())
+        },
+    )
+}
+
 fn open_configured_vault(home: &Path) -> Option<Arc<OpenVault>> {
     let application_support = default_application_support(home);
     let settings = existing_device_settings(&application_support)
@@ -601,6 +700,7 @@ pub enum RuntimeStateError {
 mod tests {
     use super::*;
     use crate::error::{AppErrorCode, AppErrorView};
+    use tracing_subscriber::prelude::*;
 
     #[tokio::test]
     async fn blocking_work_returns_result_without_using_the_command_thread() {
@@ -613,6 +713,31 @@ mod tests {
             runtime.blocking_worker_limit(),
             DEFAULT_BLOCKING_WORKER_LIMIT
         );
+    }
+
+    #[tokio::test]
+    async fn blocking_work_preserves_operation_diagnostics_context() {
+        let directory = tempfile::tempdir().unwrap();
+        let runtime = AppRuntime::foundation_for_home(Some(directory.path().to_path_buf()));
+        let diagnostics = runtime.diagnostics.as_ref().unwrap().clone();
+        let subscriber = tracing_subscriber::registry().with(diagnostics.layer());
+        let dispatch = tracing::Dispatch::new(subscriber);
+        let operation_id = crate::domain::OperationId::generate().to_string();
+        let work = tracing::dispatcher::with_default(&dispatch, || {
+            let span = crate::diagnostics::operation_span(&operation_id);
+            let _guard = span.enter();
+            runtime.run_blocking(|| {
+                tracing::info!(
+                    target: "skills_hub::runtime",
+                    event_code = "blocking_work_test"
+                );
+            })
+        });
+
+        work.await.unwrap();
+        let export = diagnostics.prepare().unwrap();
+        assert!(export.preview.contains(&operation_id));
+        assert!(export.preview.contains("blocking_work_test"));
     }
 
     #[test]
