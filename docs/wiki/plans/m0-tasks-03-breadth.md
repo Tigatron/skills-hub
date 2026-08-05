@@ -59,11 +59,15 @@ Everything in this task is read-only against user content. The watcher translate
 
 Filesystem events are unreliable by design; treat them strictly as invalidation hints backed by reconciliation, never as correctness evidence. Large Workspace trees can be slow: keep bounded blocking workers and progressive results rather than raising depth defaults.
 
+## Implementation evidence
+
+Implemented on 2026-08-05 as a read-only Rust-owned Workspace scanner and reconciliation driver. Typed commands persist add/update/pause/remove/rescan authorization, stable filesystem identity, manual Git/non-Git projects, coverage diagnostics, and progressive per-project batch events. Traversal is hidden-aware, ignore-aware, symlink-safe, prunes default dependency/build components, enforces depth 1–32 (default 8), and reports incomplete coverage rather than establishing absence at a traversal, permission, identity, cancellation, or project-batch limit. Git worktrees, nested repositories, implicit adapter suffixes, and manual boundaries retain nearest-project ownership. The `notify` backend only produces invalidations; startup, focus resume, periodic wake fallback, overflow, disconnect, root replacement, and operation completion/rollback drive targeted or bounded reconciliation, with failed backend registration and reconciliation retried. Focused fixtures and property tests cover nested/implicit/manual projects, ignores/depth, symlink escape/cycles, cancellation, replaced identities, unavailable manual projects, watcher coalescing/faults, lifecycle idempotence, and complete-coverage-only absence.
+
 # M0-011 — Verify and ship all six adapters and custom targets
 
 | Field | Value |
 | --- | --- |
-| Status | Planned |
+| Status | Implemented |
 | Dependencies | M0-004, M0-007 |
 | PRD coverage | SCN-01/02, DPL-01/02/03/04/09 |
 | Design | [Target adapters](../interfaces/target-adapters.md), [Scanning and reconciliation](../workflows/scanning-and-reconciliation.md), [Takeover and deployment](../workflows/takeover-and-deployment.md) |
@@ -107,11 +111,15 @@ This task broadens data-driven descriptors over the existing generic filesystem 
 
 Upstream path conventions may change between verification and release; the recorded evidence plus user path overrides keep the product usable, and re-verification updates only descriptor data. Do not mark a descriptor `Verified` without a documented source check.
 
+## Implementation evidence
+
+Implemented on 2026-08-05 through the existing generic scanner and Operation kernel. Six versioned descriptors carry current official-source evidence; persisted adapter configuration controls enablement and safe global/project overrides; configured global scans cover defaults, overrides, and custom global targets independently; and custom registration records display/scope/mode/project metadata plus canonical filesystem identity. Deployment planning applies the same family-independent mode defaults and post-commit verifier, while changed adapter-version evidence returns `Unverified` without rewriting the recorded target path. Generated bindings expose descriptor/configuration, scan-all, override, and custom-target commands. Automated matrices cover descriptor identity/path serialization, six-root no-write scanning, disable/override/custom/re-enable breadth, all-family global/Git/personal mode defaults, custom root replacement and explicit reselection, and adapter-version invalidation.
+
 # M0-012 — Implement Vault lifecycle: watch, verify, repair, relocate, rebuild, and GC
 
 | Field | Value |
 | --- | --- |
-| Status | Planned |
+| Status | Implemented |
 | Dependencies | M0-003, M0-008 |
 | PRD coverage | VLT-05/06/07/08 |
 | Design | [Vault and SQLite](../storage/vault-and-sqlite.md), [Bundle objects and retention](../storage/bundle-hashing-and-objects.md), [Operation model](../domain/operation-recovery-and-trash.md), [Transaction execution](../workflows/transaction-execution.md) |
@@ -158,6 +166,10 @@ All mutating lifecycle actions (relocate, repair that writes, GC physical deleti
 ## Risks and recovery
 
 Relocation has the largest blast radius of any M0 Vault operation; the old Vault must remain a complete recovery point until the user confirms the verified result. A GC defect destroys history silently, which is why deletion is two-phase and reference verification must pass in the same run.
+
+## Implementation evidence
+
+Implemented on 2026-08-05 in the Rust lifecycle service and typed command boundary. Real temporary-Vault tests exercise external-edit re-hashing with byte/tree no-overwrite evidence, exact-path read-only verification, reviewed unambiguous manifest restoration and stale-plan refusal, lifecycle evidence isolation/recovery classification, GC containment/index-divergence refusal, and relocation capability/retained-authority/confirmation checks. The service also implements manifest/journal-driven index replacement with a retained old-index backup, conservative digest reference discovery across manifests, baselines/revisions, Snapshots, Trash, protected/unresolved standard journals, and lifecycle journals, two-phase pending deletion, destination capability preflight, verified relocation cutover, managed absolute-link rewriting, and confirmation-gated old-Vault cleanup. Index rebuild and successful relocation deliberately return `restartRequired: true`: existing runtime handles remain attached to the retained recoverable old database/Vault until restart rather than being silently rebound.
 
 # M0-013 — Implement Trash, restore, permanent delete, and operation undo
 

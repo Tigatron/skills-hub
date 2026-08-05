@@ -366,6 +366,133 @@ impl Repositories {
         Ok(())
     }
 
+    /// # Errors
+    /// Returns an error when persisted configuration cannot be read or projected.
+    pub fn adapter_configurations(
+        &self,
+    ) -> Result<Vec<AdapterConfigurationRecord>, RepositoryError> {
+        self.database.execute(|connection| {
+            let mut statement = connection.prepare("SELECT adapter_name, adapter_id, enabled, global_override_path, project_override_path, created_at_ms, updated_at_ms FROM adapter_configurations ORDER BY adapter_name")?;
+            statement.query_map([], |row| Ok(AdapterConfigurationRecord {
+                adapter_name: row.get(0)?, adapter_id: parse_text(&row.get::<_, String>(1)?, 1)?, enabled: row.get(2)?,
+                global_override_path: row.get::<_, Option<String>>(3)?.map(PathBuf::from), project_override_path: row.get(4)?,
+                created_at: parse_millis(row.get(5)?, 5)?, updated_at: parse_millis(row.get(6)?, 6)?,
+            }))?.collect::<Result<Vec<_>, _>>().map_err(DbExecutorError::Sqlite)
+        }).map_err(RepositoryError::Database)
+    }
+
+    /// Persists the selected directory identity for a manual project.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the database write fails.
+    pub fn set_manual_project_identity(
+        &self,
+        id: ProjectId,
+        identity: AuthorizationIdentityRecord,
+    ) -> Result<(), RepositoryError> {
+        self.database.execute(move |connection| {
+            connection.execute(
+                "INSERT INTO manual_project_identities(project_id, device_id, file_id)
+                 VALUES (?1, ?2, ?3)
+                 ON CONFLICT(project_id) DO UPDATE SET
+                    device_id = excluded.device_id, file_id = excluded.file_id",
+                params![
+                    id.to_string(),
+                    identity.device_id.to_string(),
+                    identity.file_id.to_string()
+                ],
+            )?;
+            Ok(())
+        })?;
+        Ok(())
+    }
+
+    /// Returns the filesystem identity authorized for a manual project.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the database read or integer projection fails.
+    pub fn manual_project_identity(
+        &self,
+        id: ProjectId,
+    ) -> Result<Option<AuthorizationIdentityRecord>, RepositoryError> {
+        self.database
+            .execute(move |connection| {
+                connection.query_row(
+                "SELECT device_id, file_id FROM manual_project_identities WHERE project_id = ?1",
+                [id.to_string()],
+                authorization_identity_from_row,
+            ).optional().map_err(DbExecutorError::Sqlite)
+            })
+            .map_err(RepositoryError::Database)
+    }
+
+    /// Returns all manually authorized projects independently of Workspace discovery roots.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when persisted project data cannot be projected.
+    pub fn manual_projects(&self) -> Result<Vec<ProjectRecord>, RepositoryError> {
+        self.database
+            .execute(|connection| {
+                let mut statement = connection.prepare(
+                    "SELECT id, workspace_root_id, root_path, canonical_path, discovery_evidence,
+                        git_classification, manual, created_at_ms, updated_at_ms
+                 FROM projects WHERE manual = 1 ORDER BY canonical_path, id",
+                )?;
+                statement
+                    .query_map([], |row| {
+                        let id = parse_text(&row.get::<_, String>(0)?, 0)?;
+                        project_from_row_offset(id, row, 1)
+                    })?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(DbExecutorError::Sqlite)
+            })
+            .map_err(RepositoryError::Database)
+    }
+
+    /// # Errors
+    /// Returns an error when the configuration cannot be encoded or persisted.
+    pub fn upsert_adapter_configuration(
+        &self,
+        record: AdapterConfigurationRecord,
+    ) -> Result<(), RepositoryError> {
+        let global = record
+            .global_override_path
+            .as_deref()
+            .map(path_text)
+            .transpose()?;
+        let created_at = millis(record.created_at)?;
+        let updated_at = millis(record.updated_at)?;
+        self.database.execute(move |connection| {
+            connection.execute("INSERT INTO adapter_configurations(adapter_name, adapter_id, enabled, global_override_path, project_override_path, created_at_ms, updated_at_ms) VALUES (?1,?2,?3,?4,?5,?6,?7) ON CONFLICT(adapter_name) DO UPDATE SET adapter_id=excluded.adapter_id, enabled=excluded.enabled, global_override_path=excluded.global_override_path, project_override_path=excluded.project_override_path, updated_at_ms=excluded.updated_at_ms", params![record.adapter_name, record.adapter_id.to_string(), record.enabled, global, record.project_override_path, created_at, updated_at])?;
+            Ok(())
+        }).map_err(RepositoryError::Database)
+    }
+
+    /// # Errors
+    /// Returns an error when persisted registration metadata cannot be projected.
+    pub fn target_registration_metadata(
+        &self,
+        id: TargetId,
+    ) -> Result<Option<TargetRegistrationMetadataRecord>, RepositoryError> {
+        self.database.execute(move |connection| connection.query_row("SELECT display_name, preferred_mode, root_device_id, root_file_id, override_kind, created_at_ms, updated_at_ms FROM target_registration_metadata WHERE target_id=?1", [id.to_string()], |row| Ok(TargetRegistrationMetadataRecord {
+            target_id: id, display_name: row.get(0)?, preferred_mode: row.get::<_, Option<String>>(1)?.map(|v| parse_deployment_mode(&v, 1)).transpose()?, root_device_id: row.get::<_, String>(2)?.parse().map_err(|e| rusqlite::Error::FromSqlConversionFailure(2, Type::Text, Box::new(e)))?, root_file_id: row.get::<_, String>(3)?.parse().map_err(|e| rusqlite::Error::FromSqlConversionFailure(3, Type::Text, Box::new(e)))?, override_kind: row.get(4)?, created_at: parse_millis(row.get(5)?, 5)?, updated_at: parse_millis(row.get(6)?, 6)?,
+        })).optional().map_err(DbExecutorError::Sqlite)).map_err(RepositoryError::Database)
+    }
+
+    /// # Errors
+    /// Returns an error when registration metadata cannot be persisted.
+    pub fn upsert_target_registration_metadata(
+        &self,
+        record: TargetRegistrationMetadataRecord,
+    ) -> Result<(), RepositoryError> {
+        let created_at = millis(record.created_at)?;
+        let updated_at = millis(record.updated_at)?;
+        self.database.execute(move |connection| { connection.execute("INSERT INTO target_registration_metadata(target_id, display_name, preferred_mode, root_device_id, root_file_id, override_kind, created_at_ms, updated_at_ms) VALUES (?1,?2,?3,?4,?5,?6,?7,?8) ON CONFLICT(target_id) DO UPDATE SET display_name=excluded.display_name, preferred_mode=excluded.preferred_mode, root_device_id=excluded.root_device_id, root_file_id=excluded.root_file_id, override_kind=excluded.override_kind, updated_at_ms=excluded.updated_at_ms", params![record.target_id.to_string(), record.display_name, record.preferred_mode.map(deployment_mode_text), record.root_device_id.to_string(), record.root_file_id.to_string(), record.override_kind, created_at, updated_at])?; Ok(()) }).map_err(RepositoryError::Database)
+    }
+
     /// Returns a target by its stable identifier.
     ///
     /// # Errors

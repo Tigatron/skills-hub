@@ -94,6 +94,13 @@ impl From<RuntimeStateError> for AppErrorView {
                 "Skills Hub could not establish authoritative operation state.", false,
                 Some("inspect_recovery"),
             ),
+            RuntimeStateError::RestartRequired => app_error(
+                AppErrorCode::RecoveryRequired,
+                "Restart required",
+                "Vault maintenance completed. Restart Skills Hub before issuing more commands.",
+                false,
+                Some("restart_app"),
+            ),
         }
     }
 }
