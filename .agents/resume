@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Fast orb wake repair — no installs. Keep under ~10s.
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+
+export PATH="${HOME}/.cargo/bin:${PATH}"
+
+if command -v mise >/dev/null 2>&1; then
+  # shellcheck disable=SC1091
+  eval "$(mise activate bash)" 2>/dev/null || true
+  hash -r 2>/dev/null || true
+fi
+
+if [[ -f "${HOME}/.cargo/env" ]]; then
+  # shellcheck disable=SC1091
+  source "${HOME}/.cargo/env"
+fi
+
+missing=0
+for cmd in node pnpm rustc cargo; do
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    printf 'resume: missing %s (re-run .agents/setup)\n' "$cmd" >&2
+    missing=1
+  fi
+done
+
+if [[ "$missing" -ne 0 ]]; then
+  exit 1
+fi
+
+printf 'resume ok node=%s pnpm=%s rustc=%s\n' \
+  "$(node -v 2>/dev/null || echo '?')" \
+  "$(pnpm -v 2>/dev/null || echo '?')" \
+  "$(rustc -V 2>/dev/null || echo '?')"

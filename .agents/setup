@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+# Skills Hub orb setup — idempotent, non-interactive.
+# Prefer mise-managed Node/pnpm/Rust when available; do not install competing
+# package managers on top of an existing mise host.
+# M0 is a macOS Tauri app. On Linux orbs, install system deps needed for the
+# Rust library + renderer quality gates; full native windowing stays macOS-only.
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+
+log() { printf '+ %s\n' "$*"; }
+
+export PATH="${HOME}/.cargo/bin:${PATH}"
+OS="$(uname -s)"
+log "setup start (os=${OS}) root=${repo_root}"
+
+# --- mise first (host standard) ----------------------------------------------
+if command -v mise >/dev/null 2>&1; then
+  log "mise activate"
+  # shellcheck disable=SC1091
+  eval "$(mise activate bash)"
+  # Ensure project-declared tools are present without forcing global installs
+  if [[ -f rust-toolchain.toml ]] || [[ -f .node-version ]]; then
+    mise install 2>/dev/null || true
+  fi
+  hash -r
+fi
+
+# --- system packages (Debian/Ubuntu orbs only) -------------------------------
+if [[ -f /etc/debian_version ]]; then
+  export DEBIAN_FRONTEND=noninteractive
+  need_apt=0
+  command -v curl >/dev/null 2>&1 || need_apt=1
+  command -v pkg-config >/dev/null 2>&1 || need_apt=1
+  if [[ "$need_apt" -eq 1 ]] || ! pkg-config --exists webkit2gtk-4.1 2>/dev/null; then
+    log "apt-get update + build/Tauri Linux deps"
+    sudo apt-get update -y
+    sudo apt-get install -y --no-install-recommends \
+      ca-certificates curl build-essential pkg-config \
+      libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+      librsvg2-dev patchelf libssl-dev
+  else
+    log "system packages already present"
+  fi
+fi
+
+# --- Node --------------------------------------------------------------------
+if ! command -v node >/dev/null 2>&1; then
+  if command -v mise >/dev/null 2>&1; then
+    NODE_WANT="$(tr -d '[:space:]' < .node-version 2>/dev/null || echo 24.12.0)"
+    log "mise install node@${NODE_WANT}"
+    mise install "node@${NODE_WANT}"
+    eval "$(mise activate bash)"
+    hash -r
+  else
+    log "ERROR: node missing and mise unavailable" >&2
+    exit 1
+  fi
+fi
+log "node $(node -v)"
+
+# --- pnpm via mise only (never corepack/npm -g on mise hosts) ----------------
+if ! command -v pnpm >/dev/null 2>&1; then
+  if command -v mise >/dev/null 2>&1; then
+    # Prefer packageManager pin when installing into mise
+    PNPM_WANT="$(node -e "const p=require('./package.json');console.log((p.packageManager||'pnpm@10.28.1').replace(/^pnpm@/,''))" 2>/dev/null || echo 10.28.1)"
+    log "mise install pnpm@${PNPM_WANT}"
+    mise install "pnpm@${PNPM_WANT}"
+    eval "$(mise activate bash)"
+    hash -r
+  else
+    log "ERROR: pnpm missing and mise unavailable" >&2
+    exit 1
+  fi
+fi
+log "pnpm $(pnpm -v)"
+
+# --- Rust --------------------------------------------------------------------
+if ! command -v rustup >/dev/null 2>&1 && ! command -v rustc >/dev/null 2>&1; then
+  if command -v mise >/dev/null 2>&1; then
+    log "mise install rust@1.89.0"
+    mise install rust@1.89.0
+    eval "$(mise activate bash)"
+    hash -r
+  else
+    log "install rustup (no mise)"
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
+    # shellcheck disable=SC1091
+    source "${HOME}/.cargo/env"
+  fi
+fi
+export PATH="${HOME}/.cargo/bin:${PATH}"
+# rust-toolchain.toml selects 1.89.0 + clippy/rustfmt
+log "rust toolchain via rust-toolchain.toml"
+rustup show 2>/dev/null || true
+rustc -V
+cargo -V
+
+if [[ "$OS" == "Linux" ]]; then
+  rustup component add clippy rustfmt 2>/dev/null || true
+fi
+
+# --- dependencies ------------------------------------------------------------
+log "pnpm install --frozen-lockfile"
+pnpm install --frozen-lockfile
+
+log "cargo fetch"
+cargo fetch --manifest-path src-tauri/Cargo.toml
+
+# --- orb agent notes ---------------------------------------------------------
+mkdir -p "${HOME}/.config/amp"
+cat > "${HOME}/.config/amp/AGENTS.md" <<'EOF'
+# Skills Hub (orb notes)
+
+- Host toolchains are mise-managed. Do not install competing pnpm/node via corepack/npm -g.
+- M0 is local-first macOS Tauri. Prefer `pnpm test:rust`, `pnpm test:frontend`,
+  `pnpm typecheck`, `pnpm docs:check`, Clippy over full `tauri build` on Linux.
+- Pins: `.node-version`, `package.json#packageManager`, `rust-toolchain.toml` (1.89.0).
+- Domain truth is Rust-owned. Wiki: `docs/wiki/`. No M1/M2 features in M0.
+- Quality gate: `pnpm check`.
+- Interrupted focus: finish `M0-008` (multi-target recovery, startup recovery, Activity),
+  then `M0-009` thin-slice UI.
+EOF
+
+log "setup complete"
+printf 'node=%s pnpm=%s rustc=%s\n' "$(node -v)" "$(pnpm -v)" "$(rustc -V)"

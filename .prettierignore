@@ -1,0 +1,5 @@
+dist/
+node_modules/
+reference/
+src/bindings.ts
+src-tauri/target/

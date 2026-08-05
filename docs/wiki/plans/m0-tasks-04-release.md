@@ -1,0 +1,151 @@
+---
+type: Implementation Plan
+title: M0 Tasks 015–017 — Release Gates
+description: Executable tasks for filesystem/reliability hardening, accessibility and performance gates, and M0 acceptance plus packaging.
+status: planned
+tags: [skills-hub, m0, tasks, release]
+requirements: [IMP-08, SCN-04, IMP-04, IMP-06, DPL-06, DPL-07, DPL-08, DEL-04, DEL-06]
+timestamp: 2026-07-23T00:00:00Z
+---
+
+# M0-015 — Filesystem and reliability hardening
+
+| Field | Value |
+| --- | --- |
+| Status | Planned |
+| Dependencies | M0-008, M0-009, M0-010, M0-011, M0-012, M0-013, M0-014 |
+| PRD coverage | IMP-08 (implementation); hardening evidence for SCN-04, IMP-04/06, DPL-06/07/08, DEL-04/06 and PRD §14.3/§17.3 |
+| Design | [Filesystem safety](../security/filesystem-safety.md), [Transaction execution](../workflows/transaction-execution.md), [Takeover and deployment](../workflows/takeover-and-deployment.md), [Testing and acceptance](../quality/testing-and-acceptance.md) |
+| Parallelization | Per the roadmap, individual fault suites are added alongside each mutation feature in earlier tasks; this task consolidates, fills gaps, and runs them as one gate. Suite strands (path/link, crash matrix, preflight blockers, cleanup audit) are independent. |
+
+## Deliverables
+
+- Consolidated adversarial path/link suite: property tests for component rejection, normalization/case collisions, containment, nonexistent descendants, broken/retargeted/cyclic/escaping links, and special files across every mutation kind.
+- TOCTOU race tests replacing parents/destinations around failpoints, requiring `StalePlan` or `RecoveryRequired` outcomes rather than corruption.
+- Complete crash matrix: child-process termination at every durable boundary for takeover, deployment, undeploy, Trash, restore, relocate, and batch operations, with idempotent startup-recovery assertions.
+- Preflight blocker coverage: permissions, read-only volumes, disk-capacity estimates, copy byte/count caps, unsupported-filesystem reliability detection, and stale-plan storms under concurrent scans.
+- Cleanup ownership audit of every deletion call site, proving containment in journal-owned paths and that cleanup failure never widens scope.
+- Best-effort local provenance recovery (IMP-08): inspect parent Git metadata and known local lockfiles without network access, label evidence and confidence, and never block takeover on absence or ambiguity.
+- Error envelope and logging completeness pass: every terminal failure carries a stable code, safe paths, and a next safe action; causal chains stay in local logs.
+- Local structured `tracing` only: 25 MB/seven-day rolling bound, info default/debug opt-in, Operation correlation, path/content/secret redaction, no telemetry/crash upload, and user-reviewed diagnostic export distinct from Activity/journals.
+
+## Implementation boundary
+
+This task hardens and evidences existing contracts; it changes behavior only where a suite exposes a defect. Fixes land in the owning module with its owning task's tests extended.
+
+## Explicitly excluded
+
+- M1 full static content audit, quarantine, and Trust Sheet.
+- Sandboxing claims against same-user hostile processes beyond the documented detect-and-stop response.
+- Any network-dependent feature.
+
+## Acceptance conditions
+
+- Every failpoint × operation-kind combination terminates in exactly one documented outcome: `FailedNoWrites`, `FailedRolledBack`, `RecoveryRequired`, or completed finalization on restart.
+- No cleanup call site can delete outside its proven operation-owned paths in the audit tests.
+- Injected races produce stale/blocked/recovery outcomes with all identifiable content versions preserved.
+- Recovered provenance appears with evidence and confidence labels; takeover proceeds identically when recovery finds nothing.
+- Blocked and canceled plans demonstrate zero mutation via before/after tree comparison at breadth scale.
+
+## Automated tests
+
+- The consolidated suites above, wired as one required gate in CI alongside the per-task suites they extend.
+- Regression tests for every defect found during hardening, attached to the owning module.
+
+## Risks and recovery
+
+The combination space is large; prioritize one full boundary sweep per operation kind over exhaustive cross-products, and document any deliberately skipped combination. Defects found here may reopen earlier tasks — treat that as the gate working, not as scope creep.
+
+# M0-016 — Accessibility and performance gate
+
+| Field | Value |
+| --- | --- |
+| Status | Planned |
+| Dependencies | M0-014, M0-015 |
+| PRD coverage | M0 acceptance criterion 12; PRD §17 performance/reliability targets and §18 accessibility requirements |
+| Design | [Testing and acceptance](../quality/testing-and-acceptance.md), [Tauri/UI contract](../interfaces/tauri-and-ui-state.md) |
+| Parallelization | Accessibility and performance work can be distributed by surface, but this task owns the integrated measured result on one documented machine and dataset. |
+
+## Deliverables
+
+- Reference-scale fixture generator: 1,000 Vault Skills, 5,000 observations/deployed locations, 200 projects across several Workspace Roots, 20 targets in one plan.
+- Release-build performance measurements with documented hardware, dataset, build, and percentile/sample counts against the quality-plan gates (launch < 1.5 s, warm global scan < 1 s, Workspace first result < 2 s, Library search < 100 ms, plan generation < 500 ms excluding required new hashing).
+- Virtualization, query, and indexing tuning required to meet those gates while the UI stays interactive during hashing, scans, and Operations.
+- Complete keyboard path through scan → takeover → plan → deploy → verify → undeploy → Trash → restore, with visible focus and focus return after cancel/completion/dialog close.
+- Accessible table/list semantics, text-plus-icon status labels, reduced-motion and increased-contrast behavior, system appearance, text scaling, and 900×600 layout verification.
+- macOS screen-reader and native-integration manual checklist with recorded results.
+
+## Implementation boundary
+
+This task tunes and verifies; feature behavior and mutation semantics do not change. Performance fixes that require contract changes go back through the owning concept page first.
+
+## Explicitly excluded
+
+- Non-macOS performance evidence and telemetry-based measurement (the product has none).
+- New surfaces or visual redesign.
+
+## Acceptance conditions
+
+- All performance gates pass with percentile evidence on the documented reference machine; a single best run is not evidence.
+- The complete core workflow is keyboard-only operable; an inaccessible recovery or destructive confirmation is a release blocker.
+- Automated static accessibility checks pass on component suites; the manual checklist has no open blocker.
+- UI interactivity holds during a reference-scale scan plus a running Operation.
+
+## Automated tests
+
+- Repeatable performance harness with committed fixture generation and threshold assertions.
+- Keyboard flow and focus-management integration tests.
+- Static accessibility checks in component tests; the manual checklist remains a documented artifact.
+
+## Risks and recovery
+
+Measurement flakiness invites gate erosion; fix the harness or document variance rather than widening thresholds. If a gate cannot be met without a schema or read-model change, update the owning design page and its tests instead of patching around the measurement.
+
+# M0-017 — M0 acceptance verification and packaging
+
+| Field | Value |
+| --- | --- |
+| Status | Planned |
+| Dependencies | M0-016 |
+| PRD coverage | All 12 PRD §19.1 acceptance criteria; M0 Definition of Done sweep across VLT-01..08, SCN-01..09, IMP-01..08, DPL-01..12, DEL-01..06 |
+| Design | [M0 roadmap](m0-roadmap.md), [Testing and acceptance](../quality/testing-and-acceptance.md), [Traceability](../traceability.md) |
+| Parallelization | Acceptance evidence collection, packaging, and documentation sync are separable, but the release decision is a single serial gate. |
+
+## Deliverables
+
+- Execute the 12-criterion acceptance mapping from the quality plan on a clean macOS environment, recording evidence per criterion.
+- Network-disabled verification of every core workflow, with no account and no telemetry.
+- Verify the accepted product name, bundle ID, default Vault, and minimum macOS metadata in produced artifacts.
+- Reproducible native Apple Silicon macOS 14+ local build and packaged artifact (app bundle/DMG) from a documented clean build, preserving source compatibility and compile checks for both macOS architectures where feasible.
+- Document ad-hoc/local or unsigned status and the future signing seam; Developer ID, notarization, auto-update, Universal Binary, and Intel runtime validation are not M0 requirements. Never instruct users to disable Gatekeeper.
+- Final documentation sync: concept statuses and [traceability](../traceability.md) updated to implementation reality, with remaining manual/platform verification recorded honestly.
+- Release notes covering scope, known limitations, and the M1 boundary.
+
+## Implementation boundary
+
+This task ships evidence and artifacts. Product code changes are limited to release-blocking defects found during acceptance, each fixed in its owning module with tests.
+
+## Explicitly excluded
+
+- Windows/Linux packaging and auto-update infrastructure.
+- Any M1 feature slipped in as a “release extra.”
+
+## Acceptance conditions
+
+- 12/12 M0 acceptance criteria pass on a clean macOS machine with recorded evidence; no criterion closes on a screenshot or happy-path unit test alone.
+- The traceability matrix shows implementation and verification evidence for all 43 M0 requirements.
+- The packaged artifact installs on a clean HOME and completes the full thin-slice workflow.
+- The M0 Definition of Done in the [roadmap](m0-roadmap.md) is satisfied line by line.
+
+## Automated tests
+
+- The full CI gate set from the quality plan, run against the release build.
+- A packaged-app smoke script for first run and the thin slice on a disposable HOME.
+
+## Risks and recovery
+
+Local/ad-hoc packaging must not accidentally imply notarization or Intel runtime evidence. If acceptance exposes a contract defect, reopen the owning task and concept page rather than annotating the failure away.
+
+# Release exit gate
+
+M0 ships only when this page's three gates pass together: the hardening suites are green as one gate, the accessibility/performance evidence is recorded, and 12/12 acceptance criteria plus the 43-requirement traceability sweep hold on the packaged build.

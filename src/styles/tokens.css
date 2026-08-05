@@ -1,0 +1,66 @@
+:root {
+  color-scheme: light dark;
+
+  --font-body: 'Avenir Next', 'Avenir', sans-serif;
+
+  --surface-canvas: oklch(96.5% 0.003 255);
+  --surface-context: oklch(94.5% 0.004 255);
+  --surface-primary: oklch(98.5% 0.002 255);
+  --surface-loading: oklch(92.5% 0.004 255);
+
+  --ink-strong: oklch(23% 0.01 255);
+  --ink-soft: oklch(43% 0.012 255);
+  --ink-muted: oklch(56% 0.01 255);
+
+  --line-strong: oklch(72% 0.006 255);
+  --line-subtle: oklch(86% 0.005 255);
+
+  --accent-solid: oklch(54% 0.13 50);
+  --accent-soft: oklch(91% 0.04 55);
+  --accent-ink: oklch(42% 0.11 48);
+
+  --state-success: oklch(57% 0.12 152);
+  --state-pending: oklch(65% 0.09 75);
+  --state-danger: oklch(57% 0.16 28);
+  --focus-ring: oklch(56% 0.16 245);
+
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface-canvas: oklch(20% 0.006 255);
+    --surface-context: oklch(22.5% 0.007 255);
+    --surface-primary: oklch(18.5% 0.006 255);
+    --surface-loading: oklch(25% 0.007 255);
+
+    --ink-strong: oklch(91% 0.006 255);
+    --ink-soft: oklch(76% 0.008 255);
+    --ink-muted: oklch(63% 0.008 255);
+
+    --line-strong: oklch(42% 0.008 255);
+    --line-subtle: oklch(30% 0.007 255);
+
+    --accent-solid: oklch(68% 0.13 55);
+    --accent-soft: oklch(31% 0.05 52);
+    --accent-ink: oklch(78% 0.11 58);
+
+    --state-success: oklch(70% 0.13 152);
+    --state-pending: oklch(76% 0.1 78);
+    --state-danger: oklch(70% 0.16 28);
+    --focus-ring: oklch(72% 0.14 240);
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --line-subtle: var(--line-strong);
+    --ink-muted: var(--ink-soft);
+  }
+}

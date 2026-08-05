@@ -1,0 +1,68 @@
+[package]
+name = "skills-hub"
+version = "0.1.0"
+description = "Local-first library and distribution manager for Agent Skills"
+authors = ["Skills Hub contributors"]
+edition = "2024"
+rust-version = "1.89"
+license = "MIT"
+publish = false
+
+[lib]
+name = "skills_hub_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "skills-hub"
+path = "src/main.rs"
+
+[[example]]
+name = "export-bindings"
+path = "examples/export_bindings.rs"
+
+[build-dependencies]
+tauri-build = { version = "=2.6.1", features = [] }
+
+[dependencies]
+fs2 = "0.4"
+hex = "0.4"
+rusqlite = { version = "0.37", features = ["backup", "bundled"] }
+rustix = { version = "1.1", features = ["fs"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+specta = { version = "=2.0.0-rc.22", features = ["derive"] }
+specta-typescript = "=0.0.9"
+tauri = { version = "=2.11.1", features = [] }
+tauri-plugin-single-instance = "2"
+tauri-specta = { version = "=2.0.0-rc.21", features = ["derive", "typescript"] }
+thiserror = "2"
+time = { version = "0.3", features = ["formatting", "parsing", "serde"] }
+tokio = { version = "=1.52.2", features = ["macros", "rt-multi-thread", "sync", "time"] }
+unicode-casefold = "0.2"
+unicode-normalization = "0.1"
+uuid = { version = "1", features = ["serde", "v7"] }
+
+[dev-dependencies]
+proptest = "1"
+tempfile = "3"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+test-hooks = []
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+opt-level = "s"
+panic = "unwind"
+strip = "symbols"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
