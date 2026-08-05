@@ -55,10 +55,7 @@ pub async fn operation_execute(
                     .execute_operation(&request.operation_id, &request.plan_digest)
                     .map(AnyOperationView::Takeover)
                     .map_err(AppErrorView::from),
-                OperationKind::Deploy | OperationKind::Undeploy => deployment
-                    .execute_any_operation(&request.operation_id, &request.plan_digest)
-                    .map_err(AppErrorView::from),
-                OperationKind::Undo => deployment
+                OperationKind::Deploy | OperationKind::Undeploy | OperationKind::Undo => deployment
                     .execute_any_operation(&request.operation_id, &request.plan_digest)
                     .map_err(AppErrorView::from),
                 _ => Err(AppErrorView::from(
@@ -114,10 +111,7 @@ pub async fn operation_get(
                     .get_operation(&request.operation_id)
                     .map(AnyOperationView::Takeover)
                     .map_err(AppErrorView::from),
-                OperationKind::Deploy | OperationKind::Undeploy => deployment
-                    .get_any_operation(&request.operation_id)
-                    .map_err(AppErrorView::from),
-                OperationKind::Undo => deployment
+                OperationKind::Deploy | OperationKind::Undeploy | OperationKind::Undo => deployment
                     .get_any_operation(&request.operation_id)
                     .map_err(AppErrorView::from),
                 _ => Err(AppErrorView::from(

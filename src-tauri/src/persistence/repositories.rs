@@ -1152,6 +1152,10 @@ impl Repositories {
     }
 
     /// Atomically publishes all deployment read models and one idempotent Activity.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when projection evidence disagrees or the critical transaction fails.
     pub fn finalize_batch_deployment(
         &self,
         projection: BatchDeploymentProjection,

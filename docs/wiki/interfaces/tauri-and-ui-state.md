@@ -28,7 +28,7 @@ Generated bindings now expose `takeover_keep_external`, `takeover_plan`, `operat
 
 # M0-007 implementation evidence
 
-Generated bindings add `target_register_fixture`, `targets_list`, `deployment_plan`, `undeploy_plan`, `deployment_verify`, and bounded/filterable `deployments_list`. Deployment mutation intents contain only Skill/Target/Deployment IDs, requested mode, or explicit undeploy resolution; the fixture registration command is the sole directory-selection seam. The existing `operation_execute`, `operation_get`, and `operation_cancel` commands dispatch persisted takeover, deploy, and undeploy Operations by kind while preserving the ID-plus-digest execution contract. Health, drift direction, explanations, actions, disabled reasons, and terminal outcomes are Rust-owned DTO fields. Activity listing, operation events, and startup recovery action execution remain later work.
+Generated bindings add `target_register_fixture`, `targets_list`, `deployment_plan`, `undeploy_plan`, `deployment_verify`, and bounded/filterable `deployments_list`. Deployment mutation intents contain only Skill/Target/Deployment IDs, requested mode, or explicit undeploy resolution; the fixture registration command is the sole directory-selection seam. The existing `operation_execute`, `operation_get`, and `operation_cancel` commands dispatch persisted takeover, deploy, and undeploy Operations by kind while preserving the ID-plus-digest execution contract. Health, drift direction, explanations, actions, disabled reasons, and terminal outcomes are Rust-owned DTO fields. Activity listing and startup recovery action execution are delivered in M0-008; operation progress events remain later UI work.
 
 # M0-008 implementation evidence
 

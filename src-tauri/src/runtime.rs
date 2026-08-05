@@ -202,8 +202,7 @@ impl AppRuntime {
                         .map(|value| format!("{value:?}"));
                     let status = outcome
                         .as_deref()
-                        .map(str::to_lowercase)
-                        .unwrap_or_else(|| "error".into());
+                        .map_or_else(|| "error".into(), str::to_lowercase);
                     StartupRecoveryEvidence {
                         operation_id: id.to_string(),
                         status,

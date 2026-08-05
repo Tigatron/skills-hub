@@ -673,6 +673,7 @@ impl DeploymentService {
         Ok((context, step, current.stats, now))
     }
 
+    #[allow(clippy::too_many_lines)]
     pub fn plan_batch_deployment(
         &self,
         request: &BatchDeploymentPlanRequest,
@@ -721,7 +722,7 @@ impl DeploymentService {
         let destructive = steps.iter().any(PlanStep::is_destructive);
         let snapshot_id = destructive.then(SnapshotId::generate);
         let activity_id = ActivityId::generate();
-        let context = BatchDeploymentPlanContext {
+        let batch_context = BatchDeploymentPlanContext {
             action: BatchDeploymentAction::Deploy,
             skill: self
                 .build_deployment(&DeploymentPlanRequest {
@@ -737,12 +738,12 @@ impl DeploymentService {
             undo_of: None,
         };
         let operation_id = OperationId::generate();
-        let selected_target_ids = context
+        let selected_target_ids = batch_context
             .entries
             .iter()
             .map(|e| e.target.target_id)
             .collect::<Vec<_>>();
-        let selected_deployment_ids = context
+        let selected_deployment_ids = batch_context
             .entries
             .iter()
             .map(|e| e.deployment.deployment_id)
@@ -756,7 +757,7 @@ impl DeploymentService {
             ownership_choices: Vec::new(),
         };
         let observed = stats.expect("non-empty validated batch");
-        let content = OperationPlanContent::new(
+        let plan_content = OperationPlanContent::new(
             operation_id,
             OperationKind::Deploy,
             now,
@@ -787,20 +788,21 @@ impl DeploymentService {
             },
             Vec::new(),
         )
-        .with_batch_deployment_context(context);
+        .with_batch_deployment_context(batch_context);
         let plan = OperationPlanner::new(
             OperationStore::open(self.vault.paths.manager())
                 .map_err(|e| DeploymentError::Journal(e.to_string()))?,
         )
         .plan(
             &intent,
-            &StaticDeploymentBuilder(content),
+            &StaticDeploymentBuilder(plan_content),
             &CancellationToken::default(),
         )?;
         batch_deployment_plan_view(&plan)
     }
 
     /// Plans the inverse of a successful batch deployment after proving every postcondition.
+    #[allow(clippy::too_many_lines)]
     pub fn plan_undo(
         &self,
         operation_id: &str,
@@ -893,9 +895,11 @@ impl DeploymentService {
             .enumerate()
         {
             let mut deployment = entry.deployment.clone();
-            deployment.step_order = order as u32;
+            let step_order = u32::try_from(order)
+                .map_err(|_| DeploymentError::DriftBlocked("too many inverse steps".into()))?;
+            deployment.step_order = step_order;
             let mut inverse = step.inverse();
-            inverse.order = order as u32;
+            inverse.order = step_order;
             inverse.recovery_required = inverse.is_destructive();
             if inverse.action == PlanAction::Replace {
                 let restored_mode = if inverse.after.expected_kind == EntryKind::Symlink {
@@ -946,7 +950,7 @@ impl DeploymentService {
             .iter()
             .map(|entry| entry.deployment.deployment_id)
             .collect::<Vec<_>>();
-        let context = BatchDeploymentPlanContext {
+        let batch_context = BatchDeploymentPlanContext {
             action: BatchDeploymentAction::Undo,
             skill: original.skill.clone(),
             entries,
@@ -962,7 +966,7 @@ impl DeploymentService {
             selected_deployment_ids: deployment_ids.clone(),
             ownership_choices: Vec::new(),
         };
-        let content = OperationPlanContent::new(
+        let plan_content = OperationPlanContent::new(
             new_id,
             OperationKind::Undo,
             now,
@@ -995,10 +999,10 @@ impl DeploymentService {
             },
             Vec::new(),
         )
-        .with_batch_deployment_context(context);
+        .with_batch_deployment_context(batch_context);
         let plan = OperationPlanner::new(store).plan(
             &intent,
-            &StaticDeploymentBuilder(content),
+            &StaticDeploymentBuilder(plan_content),
             &CancellationToken::default(),
         )?;
         batch_deployment_plan_view(&plan)
@@ -1272,6 +1276,7 @@ impl DeploymentService {
         Ok(view)
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn execute_operation(
         &self,
         operation_id: &str,
@@ -1692,7 +1697,7 @@ impl DeploymentHooks {
         single_step.order = 0;
         let mut deployment = entry.deployment.clone();
         deployment.step_order = 0;
-        let context = DeploymentPlanContext {
+        let entry_authority = DeploymentPlanContext {
             action: if batch.action == BatchDeploymentAction::Deploy {
                 DeploymentProductAction::Deploy
             } else {
@@ -1704,20 +1709,20 @@ impl DeploymentHooks {
             activity_id: batch.activity_id,
             snapshot_id: step.is_destructive().then_some(batch.snapshot_id).flatten(),
         };
-        let mut content = plan.content.clone();
-        content.schema_version = 3;
-        content.kind = if batch.action == BatchDeploymentAction::Deploy {
+        let mut sealed = plan.content.clone();
+        sealed.schema_version = 3;
+        sealed.kind = if batch.action == BatchDeploymentAction::Deploy {
             OperationKind::Deploy
         } else {
             OperationKind::Undeploy
         };
-        content.selected_target_ids = vec![entry.target.target_id];
-        content.selected_deployment_ids = vec![entry.deployment.deployment_id];
-        content.steps = vec![single_step];
-        content.recovery.snapshot_count = u32::from(step.is_destructive());
-        content.batch_deployment = None;
-        content.deployment = Some(context);
-        OperationPlan::build(content).map_err(|error| hook(error.to_string()))
+        sealed.selected_target_ids = vec![entry.target.target_id];
+        sealed.selected_deployment_ids = vec![entry.deployment.deployment_id];
+        sealed.steps = vec![single_step];
+        sealed.recovery.snapshot_count = u32::from(step.is_destructive());
+        sealed.batch_deployment = None;
+        sealed.deployment = Some(entry_authority);
+        OperationPlan::build(sealed).map_err(|error| hook(error.to_string()))
     }
 
     #[allow(clippy::too_many_lines)]
@@ -1945,7 +1950,7 @@ impl StagingProvider for DeploymentHooks {
     fn stage(
         &self,
         plan: &OperationPlan,
-        _step: &PlanStep,
+        step: &PlanStep,
         staging_path: &Path,
         cancellation: &CancellationToken,
     ) -> Result<(), OperationHookError> {
@@ -1958,10 +1963,10 @@ impl StagingProvider for DeploymentHooks {
             .as_ref()
             .is_some_and(|batch| batch.action == BatchDeploymentAction::Undo)
         {
-            if _step.action != PlanAction::Replace {
+            if step.action != PlanAction::Replace {
                 return Err(hook("inverse Remove does not stage a final entry"));
             }
-            let entry = self.verify_inverse_source(plan, _step)?;
+            let entry = self.verify_inverse_source(plan, step)?;
             let reference = entry
                 .inverse
                 .as_ref()
@@ -1986,7 +1991,7 @@ impl StagingProvider for DeploymentHooks {
             return Ok(());
         }
         if plan.content.batch_deployment.is_some() {
-            let single = Self::single_plan(plan, _step)?;
+            let single = Self::single_plan(plan, step)?;
             return self.stage(
                 &single,
                 &single.content.steps[0],
@@ -2022,7 +2027,7 @@ impl StagingProvider for DeploymentHooks {
     fn revalidate_before_commit(
         &self,
         plan: &OperationPlan,
-        _step: &PlanStep,
+        step: &PlanStep,
     ) -> Result<(), OperationHookError> {
         if plan
             .content
@@ -2030,9 +2035,9 @@ impl StagingProvider for DeploymentHooks {
             .as_ref()
             .is_some_and(|batch| batch.action == BatchDeploymentAction::Undo)
         {
-            self.verify_inverse_source(plan, _step).map(|_| ())
+            self.verify_inverse_source(plan, step).map(|_| ())
         } else if plan.content.batch_deployment.is_some() {
-            let single = Self::single_plan(plan, _step)?;
+            let single = Self::single_plan(plan, step)?;
             self.revalidate(&single).map(|_| ())
         } else {
             self.revalidate(plan).map(|_| ())
@@ -3636,6 +3641,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)]
     fn mixed_batch_replace_and_create_undo_restores_exact_targets_and_relationships() {
         let fixture = fixture();
         let existing_target = target(&fixture, "batch-existing", FixtureTargetKindDto::GitProject);
@@ -3989,6 +3995,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)]
     fn batch_failpoint_matrix_covers_each_target_durable_boundary_with_exact_rollback() {
         let fixture = fixture();
         let first = target(&fixture, "matrix-first", FixtureTargetKindDto::GitProject);
@@ -4109,6 +4116,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)]
     fn batch_finalization_failpoints_reopen_and_finish_idempotently() {
         for boundary in [
             OperationBoundary::ManifestsPublished,

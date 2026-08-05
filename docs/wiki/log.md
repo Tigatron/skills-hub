@@ -1,5 +1,9 @@
 # Directory Update Log
 
+## 2026-08-05
+
+* **Implementation**: Completed `M0-008` after gate repair (Clippy `-D warnings`, Specta `u32` Activity diagnostic count, binding regeneration). Schema-v4 2–20 Target batch deploy with stage-all/reverse compensation, operation-level Snapshot protection, runtime startup recovery action driving that blocks mutation/scan until nonterminal journals resolve, bounded Activity list/detail with journal rebuild, and reviewed inverse undo that refuses drifted postconditions. Real-tree failpoint, 3/20-target, undo, startup driver/classifier, and scan Activity tests pass with the full `pnpm check` gate. Thin-slice UI remains `M0-009`.
+
 ## 2026-07-24
 
 * **Implementation**: Completed `M0-007` after two independent audit/repair passes. The Universal fixture now provides ID-derived schema-v3 deploy/redeploy/undeploy plans; global, Git-project, and non-Git Target defaults and override/fallback evidence; absolute link and exact Managed Copy execution through the shared Operation kernel; manifest/SQLite/Activity finalization; Rust-owned E/V/T and link health; and clean-remove or explicit preserve undeploy. Review repairs made retargeted/replacement/missing/broken entries safely preservable without following user links, prohibited lossy non-UTF-8 plan evidence, aligned allowed actions with executable resolutions, and added undeploy rollback proof at the backup boundary. Multi-target recovery and startup action driving remain `M0-008`.

@@ -305,6 +305,9 @@ pub struct OperationExecution {
 }
 
 /// Generic, single-owner compensating transaction executor.
+type RecoverPendingItem = (OperationId, Result<OperationExecution, OperationError>);
+type RecoverPendingResult = Result<Vec<RecoverPendingItem>, OperationError>;
+
 pub struct OperationExecutor {
     store: OperationStore,
     coordinator: Arc<OperationCoordinator>,
@@ -602,10 +605,11 @@ impl OperationExecutor {
 
     /// Recovers every currently non-terminal Operation in stable Operation-ID order.
     /// This is an explicit startup seam; callers remain responsible for runtime dispatch.
-    pub fn recover_pending(
-        &self,
-    ) -> Result<Vec<(OperationId, Result<OperationExecution, OperationError>)>, OperationError>
-    {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when listing nonterminal Operation IDs fails.
+    pub fn recover_pending(&self) -> RecoverPendingResult {
         let ids = self.store.nonterminal_operation_ids()?;
         Ok(ids
             .into_iter()
@@ -1171,7 +1175,7 @@ impl OperationExecutor {
                 .map(PathBuf::from);
             let rollback_path = if recorded_rollback
                 .as_deref()
-                .is_some_and(|path| path.exists())
+                .is_some_and(std::path::Path::exists)
             {
                 recorded_rollback
             } else if current_is_after

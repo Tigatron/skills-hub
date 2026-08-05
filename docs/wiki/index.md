@@ -29,4 +29,4 @@ This directory is the OKF v0.1 knowledge bundle for Skills Hub technical design 
 
 ## Bundle status
 
-The M0 architecture, domain, storage, workflow, interface, security, quality, and traceability contracts are `accepted`. Tasks `M0-001`–`M0-007` are complete with recorded implementation evidence; `M0-008`–`M0-017` remain planned.
+The M0 architecture, domain, storage, workflow, interface, security, quality, and traceability contracts are `accepted`. Tasks `M0-001`–`M0-008` are complete with recorded implementation evidence; `M0-009`–`M0-017` remain planned.

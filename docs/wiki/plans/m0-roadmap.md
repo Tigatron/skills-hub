@@ -34,7 +34,7 @@ M0-004 Scanner ✓ M0-005 Operation kernel ✓
        M0-007 Deploy/undeploy/drift ✓
           │
           ▼
-       M0-008 Recovery + Activity
+       M0-008 Recovery + Activity ✓
           │
           ▼
        M0-009 Thin-slice UI                 ◀── first end-to-end gate

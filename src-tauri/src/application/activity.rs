@@ -73,7 +73,7 @@ pub struct ActivityPathEvidence {
 #[derive(Debug, Clone, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivityScanEvidence {
-    pub diagnostic_count: u64,
+    pub diagnostic_count: u32,
     pub error_codes: Vec<String>,
 }
 
@@ -188,7 +188,10 @@ impl ActivityService {
                 }
             });
         let scan = detail.item.scan_run_id.map(|_| ActivityScanEvidence {
-            diagnostic_count: detail.details["diagnosticCount"].as_u64().unwrap_or(0),
+            diagnostic_count: u32::try_from(
+                detail.details["diagnosticCount"].as_u64().unwrap_or(0),
+            )
+            .unwrap_or(u32::MAX),
             error_codes: detail.details["errorCodes"]
                 .as_array()
                 .into_iter()

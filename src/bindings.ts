@@ -231,9 +231,12 @@ scanProgress: "scan-progress"
 
 /** user-defined types **/
 
-export type ActivityDetail = { item: ActivityItem; detailsJson: string }
+export type ActivityDetail = { item: ActivityItem; detailsJson: string; operation: ActivityOperationEvidence | null; scan: ActivityScanEvidence | null }
 export type ActivityItem = { id: string; kind: string; state: string; outcome: string | null; summary: string; startedAt: string; completedAt: string | null; operationId: string | null; scanRunId: string | null }
+export type ActivityOperationEvidence = { recoveryAvailable: boolean; errorCode: string | null; failedStep: number | null; planReference: string; journalReference: string; recoveryReferences: string[]; paths: ActivityPathEvidence[] }
+export type ActivityPathEvidence = { stepOrder: number; path: string; requestedMode: string | null; resolvedMode: string | null; stagePath: string | null; backupPath: string | null; rollbackPath: string | null }
 export type ActivityQuery = { kind: string | null; outcome: string | null; limit: number }
+export type ActivityScanEvidence = { diagnosticCount: number; errorCodes: string[] }
 export type AnyOperationView = { kind: "takeover"; value: OperationView } | { kind: "deployment"; value: DeploymentOperationView } | { kind: "batch_deployment"; value: BatchDeploymentOperationView }
 export type AppErrorCode = "internal" | "invalid_input" | "not_found" | "unsafe_path" | "unsupported_bundle" | "name_collision" | "stale_plan" | "operation_busy" | "cancelled" | "io_failure" | "database_failure" | "verification_failed" | "rolled_back" | "recovery_required"
 export type AppErrorView = { code: AppErrorCode; title: string; message: string; retryable: boolean; recoveryAction: string | null }

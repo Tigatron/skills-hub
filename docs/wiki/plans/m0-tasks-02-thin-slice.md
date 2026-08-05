@@ -225,7 +225,7 @@ Symlink `VaultAhead` is easy to miscommunicate because bytes are already live. P
 
 | Field | Value |
 | --- | --- |
-| Status | Planned |
+| Status | Complete (2026-08-05) |
 | Dependencies | M0-007 |
 | PRD coverage | DPL-07/08, SCN-09, DEL-06; M0 Activity/rollback scope |
 | Design | [Transaction execution](../workflows/transaction-execution.md), [Operation model](../domain/operation-recovery-and-trash.md), [Testing](../quality/testing-and-acceptance.md) |
@@ -257,6 +257,15 @@ Symlink `VaultAhead` is easy to miscommunicate because bytes are already live. P
 - Child-process crash/reopen tests at every durable boundary.
 - Journal→Activity projection and retention-reference tests.
 - Scan diagnostics Activity test without per-file noise.
+
+## Implementation evidence
+
+- Schema-v4 batch plans seal 2–20 Target IDs with deterministic ordering, mixed absolute symlink and Managed Copy modes, one operation-level Snapshot/Activity identity, and complete per-Target authority evidence. Single-target schema-v3 behavior remains unchanged.
+- Stage-all precedes the first active rename. Target-index commit failures compensate in reverse and restore every earlier target to its verified before state. Batch finalization (manifest + SQLite projection + Activity) is idempotent under reopen.
+- Runtime startup recovery drives the M0-005 classifier to durable terminal outcomes before exposing mutation or scan services; unresolved nonterminal Operations block service access. Terminal replay is idempotent and performs no filesystem side effects.
+- Reviewed inverse (undo) plans require unchanged postconditions and refuse before persistence when any target, Snapshot protection, or projection has drifted. Mixed replace/create undo restores exact targets and relationships.
+- Activity list/detail is a bounded append-only SQLite projection with typed path/mode, failure step/code, plan/journal links, and recovery references. Scan diagnostics project once without per-file noise. Terminal journals rebuild Activity idempotently.
+- Real-tree tests cover three- and twenty-target mixed batches, each-target commit failure rollback, per-target durable-boundary failpoints, finalization reopen, undo postcondition refusal, startup driver/classifier, scan Activity aggregation, and parent-driven `child.kill()` reopen. The completion gate passes all-target/all-feature Rust tests, Clippy with `-D warnings`, formatting, generated binding drift, frontend type/test/build checks, and documentation validation. M0-009 thin-slice UI remains excluded.
 
 ## Risks and recovery
 

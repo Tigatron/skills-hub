@@ -7,6 +7,7 @@ use crate::{error::AppErrorView, runtime::AppRuntime};
 
 #[tauri::command]
 #[specta::specta]
+#[allow(clippy::needless_pass_by_value)]
 pub fn startup_recovery_run(
     runtime: State<'_, AppRuntime>,
 ) -> Result<StartupRecoveryReport, AppErrorView> {
@@ -15,6 +16,7 @@ pub fn startup_recovery_run(
 
 #[tauri::command]
 #[specta::specta]
+#[allow(clippy::needless_pass_by_value)]
 pub fn startup_recovery_status(
     runtime: State<'_, AppRuntime>,
 ) -> Result<StartupRecoveryReport, AppErrorView> {
@@ -36,7 +38,7 @@ pub async fn bootstrap_get_state(
         app_version: env!("CARGO_PKG_VERSION"),
         bundle_identifier: "com.terrylan.skillshub",
         contract_version: CONTRACT_VERSION,
-        implementation_stage: "M0-004",
+        implementation_stage: "M0-008",
         runtime_status: RuntimeStatus::Ready,
         blocking_worker_limit: runtime.blocking_worker_limit(),
         platform: PlatformSummary {

@@ -1322,6 +1322,7 @@ fn validate_deployment(
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)]
 fn validate_batch_deployment(
     plan: &OperationPlanContent,
     context: &BatchDeploymentPlanContext,
@@ -1345,7 +1346,7 @@ fn validate_batch_deployment(
         .entries
         .iter()
         .enumerate()
-        .any(|(index, entry)| entry.deployment.step_order != index as u32)
+        .any(|(index, entry)| u32::try_from(index).ok() != Some(entry.deployment.step_order))
         || (context.action == BatchDeploymentAction::Deploy
             && context
                 .entries

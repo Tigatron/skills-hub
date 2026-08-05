@@ -20,7 +20,7 @@ The generic Rust Operation kernel now implements immutable canonical plans, exac
 
 # Implemented M0-006 slice
 
-The first product builder now maps takeover domain IDs and explicit choices into schema-v2 plans and executes them through the M0-005 kernel. Reopened plans carry all source, Target-authority, working-container, selected-replacement, Snapshot, manifest, and projection evidence needed for execution and replay. The generic fingerprint contract gained an explicit optional safe Bundle subpath so the executor can verify an atomically activated UUID container without inferring takeover semantics; schema v1 omits and rejects that extension. Automatic execution of classified startup actions remains M0-008.
+The first product builder now maps takeover domain IDs and explicit choices into schema-v2 plans and executes them through the M0-005 kernel. Reopened plans carry all source, Target-authority, working-container, selected-replacement, Snapshot, manifest, and projection evidence needed for execution and replay. The generic fingerprint contract gained an explicit optional safe Bundle subpath so the executor can verify an atomically activated UUID container without inferring takeover semantics; schema v1 omits and rejects that extension. Automatic execution of classified startup actions is delivered in M0-008.
 
 # M0-008 implementation evidence
 
