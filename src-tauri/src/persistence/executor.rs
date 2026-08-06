@@ -190,7 +190,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(thread_name, "skills-hub-db");
-        assert_eq!(executor.settings().unwrap().schema_version, 5);
+        assert_eq!(executor.settings().unwrap().schema_version, 6);
     }
 
     #[test]

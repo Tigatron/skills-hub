@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { forwardRef, useState, type ReactNode } from 'react';
 import { Button } from 'react-aria-components';
 
 import { CommandError } from '../lib/api';
@@ -30,33 +30,43 @@ type SimpleButtonProps = {
   isDisabled?: boolean;
 };
 
-export function PrimaryButton({ children, onPress, isDisabled = false }: SimpleButtonProps) {
-  return (
-    <Button
-      className={styles.primaryButton!}
-      onPress={onPress ?? (() => undefined)}
-      isDisabled={isDisabled}
-    >
-      {children}
-    </Button>
-  );
-}
+export const PrimaryButton = forwardRef<HTMLButtonElement, SimpleButtonProps>(
+  function PrimaryButton({ children, onPress, isDisabled = false }, ref) {
+    return (
+      <Button
+        ref={ref}
+        className={styles.primaryButton!}
+        onPress={onPress ?? (() => undefined)}
+        isDisabled={isDisabled}
+      >
+        {children}
+      </Button>
+    );
+  },
+);
 
-export function SecondaryButton({ children, onPress, isDisabled = false }: SimpleButtonProps) {
-  return (
-    <Button
-      className={styles.secondaryButton!}
-      onPress={onPress ?? (() => undefined)}
-      isDisabled={isDisabled}
-    >
-      {children}
-    </Button>
-  );
-}
+export const SecondaryButton = forwardRef<HTMLButtonElement, SimpleButtonProps>(
+  function SecondaryButton({ children, onPress, isDisabled = false }, ref) {
+    return (
+      <Button
+        ref={ref}
+        className={styles.secondaryButton!}
+        onPress={onPress ?? (() => undefined)}
+        isDisabled={isDisabled}
+      >
+        {children}
+      </Button>
+    );
+  },
+);
 
-export function DangerButton({ children, onPress, isDisabled = false }: SimpleButtonProps) {
+export const DangerButton = forwardRef<HTMLButtonElement, SimpleButtonProps>(function DangerButton(
+  { children, onPress, isDisabled = false },
+  ref,
+) {
   return (
     <Button
+      ref={ref}
       className={styles.dangerButton!}
       onPress={onPress ?? (() => undefined)}
       isDisabled={isDisabled}
@@ -64,7 +74,7 @@ export function DangerButton({ children, onPress, isDisabled = false }: SimpleBu
       {children}
     </Button>
   );
-}
+});
 
 export function StatusPill({
   tone,
@@ -73,8 +83,21 @@ export function StatusPill({
   tone: 'neutral' | 'success' | 'pending' | 'danger';
   children: ReactNode;
 }) {
+  const icon = tone === 'success' ? '✓' : tone === 'pending' ? '…' : tone === 'danger' ? '!' : '•';
+  const iconLabel =
+    tone === 'success'
+      ? 'Success'
+      : tone === 'pending'
+        ? 'Pending'
+        : tone === 'danger'
+          ? 'Error'
+          : 'Status';
   return (
     <span className={styles.statusPill} data-tone={tone}>
+      <span className={styles.statusIcon} aria-hidden="true">
+        {icon}
+      </span>
+      <span className={styles.visuallyHidden}>{iconLabel}: </span>
       {children}
     </span>
   );
@@ -131,10 +154,11 @@ function describeError(error: unknown): {
 
 export function LoadingBlock({ label }: { label: string }) {
   return (
-    <div className={styles.loadingBlock} aria-label={label}>
-      <span />
-      <span />
-      <span />
+    <div className={styles.loadingBlock} role="status" aria-live="polite" aria-busy="true">
+      <span aria-hidden="true" />
+      <span aria-hidden="true" />
+      <span aria-hidden="true" />
+      <span className={styles.visuallyHidden}>{label}</span>
     </div>
   );
 }

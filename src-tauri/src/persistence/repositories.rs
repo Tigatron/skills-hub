@@ -138,6 +138,87 @@ impl Repositories {
             .map_err(RepositoryError::Database)
     }
 
+    /// Returns active Skill rows only, for Library construction at reference scale.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `SQLite` is unavailable or an indexed value is invalid.
+    pub fn active_skills(&self) -> Result<Vec<SkillRecord>, RepositoryError> {
+        self.active_skills_matching(None)
+    }
+
+    /// Returns active Skill rows, optionally prefiltered by a case-insensitive name substring.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when `SQLite` is unavailable or an indexed value is invalid.
+    pub fn active_skills_matching(
+        &self,
+        name_contains: Option<&str>,
+    ) -> Result<Vec<SkillRecord>, RepositoryError> {
+        let needle = name_contains
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| format!("%{}%", value.to_ascii_lowercase()));
+        self.database
+            .execute(move |connection| {
+                let mut statement = connection.prepare(
+                    "SELECT id, display_name, deployment_name, working_path, working_digest,
+                            baseline_digest, lifecycle, created_at_ms, updated_at_ms
+                     FROM skills
+                     WHERE lifecycle = 'active'
+                       AND (?1 IS NULL OR lower(display_name) LIKE ?1
+                            OR lower(deployment_name) LIKE ?1
+                            OR lower(working_path) LIKE ?1)
+                     ORDER BY id",
+                )?;
+                statement
+                    .query_map(params![needle], |row| {
+                        let id = parse_text(&row.get::<_, String>(0)?, 0)?;
+                        Ok(SkillRecord {
+                            id,
+                            display_name: row.get(1)?,
+                            deployment_name: parse_deployment_name(&row.get::<_, String>(2)?, 2)?,
+                            working_path: parse_text(&row.get::<_, String>(3)?, 3)?,
+                            working_digest: parse_text(&row.get::<_, String>(4)?, 4)?,
+                            baseline_digest: parse_text(&row.get::<_, String>(5)?, 5)?,
+                            lifecycle: parse_skill_lifecycle(&row.get::<_, String>(6)?, 6)?,
+                            created_at: parse_millis(row.get(7)?, 7)?,
+                            updated_at: parse_millis(row.get(8)?, 8)?,
+                        })
+                    })?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(DbExecutorError::Sqlite)
+            })
+            .map_err(RepositoryError::Database)
+    }
+
+    /// Counts active deployments per Skill without loading full deployment rows.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the aggregate query fails.
+    pub fn active_deployment_counts(
+        &self,
+    ) -> Result<std::collections::BTreeMap<SkillId, u32>, RepositoryError> {
+        self.database
+            .execute(|connection| {
+                let mut statement = connection.prepare(
+                    "SELECT skill_id, count(*) FROM deployments WHERE active = 1 GROUP BY skill_id",
+                )?;
+                let rows = statement
+                    .query_map([], |row| {
+                        let skill_id = parse_text(&row.get::<_, String>(0)?, 0)?;
+                        let count: i64 = row.get(1)?;
+                        let count = u32::try_from(count).unwrap_or(u32::MAX);
+                        Ok((skill_id, count))
+                    })?
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(rows.into_iter().collect())
+            })
+            .map_err(RepositoryError::Database)
+    }
+
     /// Performs `SQLite`'s full integrity check. This is read-only.
     ///
     /// # Errors
@@ -1292,18 +1373,37 @@ impl Repositories {
     ///
     /// Returns an error when the query or a typed projection fails.
     pub fn external_observations(&self) -> Result<Vec<ExternalObservationRecord>, RepositoryError> {
+        self.external_observations_matching(None)
+    }
+
+    /// Returns active external observations, optionally prefiltered by a case-insensitive
+    /// deployment-name substring used as a Library search accelerator.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the query or a typed projection fails.
+    pub fn external_observations_matching(
+        &self,
+        name_contains: Option<&str>,
+    ) -> Result<Vec<ExternalObservationRecord>, RepositoryError> {
+        let needle = name_contains
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| format!("%{}%", value.to_ascii_lowercase()));
         self.database
-            .execute(|connection| {
+            .execute(move |connection| {
                 let mut statement = connection.prepare(
                     "SELECT id, adapter_id, source_root_kind, source_root_id, display_path,
                             deployment_name, digest, status, error_code, error_summary,
                             first_seen_at_ms, observed_at_ms
                      FROM observations
                      WHERE skill_id IS NULL AND status <> 'stale'
+                       AND (?1 IS NULL OR lower(deployment_name) LIKE ?1
+                            OR lower(display_path) LIKE ?1)
                      ORDER BY deployment_name, normalized_path, id",
                 )?;
                 statement
-                    .query_map([], |row| {
+                    .query_map(params![needle], |row| {
                         Ok(ExternalObservationRecord {
                             id: parse_text(&row.get::<_, String>(0)?, 0)?,
                             adapter_id: parse_text(&row.get::<_, String>(1)?, 1)?,

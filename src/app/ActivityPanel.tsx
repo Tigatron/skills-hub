@@ -1,6 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
-import { Button } from 'react-aria-components';
 
 import { api } from '../lib/api';
 import type { ReviewedPlan } from '../lib/api';
@@ -131,12 +130,20 @@ export function ActivityPanel() {
             />
           ) : null}
 
-          <div className={styles.list} role="listbox" aria-label="Activity items">
+          <div
+            className={styles.list}
+            role="listbox"
+            aria-label="Activity items"
+            aria-multiselectable={false}
+          >
             {list.data?.map((item) => (
-              <Button
+              <button
                 key={item.id}
-                className={styles.listItem!}
-                onPress={() => setSelectedId(item.id)}
+                type="button"
+                className={styles.listItem}
+                role="option"
+                aria-selected={selectedId === item.id}
+                onClick={() => setSelectedId(item.id)}
                 data-selected={selectedId === item.id}
               >
                 <div className={styles.listItemTitle}>
@@ -147,7 +154,7 @@ export function ActivityPanel() {
                   {item.kind} · {item.startedAt}
                   {item.completedAt ? ` → ${item.completedAt}` : ''}
                 </div>
-              </Button>
+              </button>
             ))}
           </div>
         </div>

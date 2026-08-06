@@ -2,6 +2,11 @@
   box-sizing: border-box;
 }
 
+html {
+  /* Respect user text scaling while keeping the 900×600 product floor. */
+  font-size: 100%;
+}
+
 html,
 body,
 #root {
@@ -13,7 +18,11 @@ body,
 
 body {
   overflow: hidden;
+  color: var(--ink-strong);
+  background: var(--surface-canvas);
   font-family: var(--font-body);
+  font-size: 1rem;
+  line-height: 1.45;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -24,6 +33,22 @@ input,
 textarea,
 select {
   font: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 ::selection {

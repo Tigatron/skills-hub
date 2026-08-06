@@ -61,9 +61,9 @@ describe('ActivityPanel', () => {
       ),
     });
 
-    await userEvent.click(await screen.findByRole('button', { name: /Deployment needs recovery/ }));
+    await userEvent.click(await screen.findByRole('option', { name: /Deployment needs recovery/ }));
     expect((await screen.findAllByText('recovery_required')).length).toBeGreaterThan(1);
-    const activityRow = screen.getByRole('button', { name: /Deployment needs recovery/ });
+    const activityRow = screen.getByRole('option', { name: /Deployment needs recovery/ });
     expect(activityRow.querySelector('[data-tone]')).toHaveAttribute('data-tone', 'danger');
     expect(screen.getByRole('button', { name: 'Copy snapshot:one' })).toBeInTheDocument();
   });

@@ -1,5 +1,9 @@
 # Directory Update Log
 
+## 2026-08-06
+
+- **Release gate**: Completed `M0-016` accessibility and performance. Added a committed reference-scale fixture generator (1k skills / 5k observations / 4k deployments / 200 projects / 4 workspace roots / 20 targets), schema-v6 Library indexes, SQL-prefiltered Library search with active-skill and deployment-count reads, debounced virtualized Library UI, listbox/option semantics, text-plus-icon status pills, focus return after Operation dismiss, reduced-motion and increased-contrast CSS, keyboard workflow tests, and a release percentile harness. Release evidence on Apple M4 / macOS 26.6 passes Library search (p95 2.5 ms), warm global scan (27 ms), Workspace first result (0.13 ms), and plan generation (53 ms); launch-to-Library and live VoiceOver remain documented for packaged M0-017 smoke.
+
 ## 2026-08-05
 
 - **Hardening**: Completed the prioritized `M0-015` filesystem/reliability gate. Shared and lifecycle failpoint matrices plus real child-process recovery cover takeover, deploy, undeploy, Trash, restore, and relocation; cleanup binds exact operation-derived paths and durable identity through old-Vault quarantine, GC, staging, probes, and temporary files; and IMP-08 records bounded no-follow local Git/lockfile provenance without affecting takeover eligibility. Local structured diagnostics now add a descriptor-bound 25 MB/seven-day store, fail-closed redaction, Operation correlation, durable debug opt-in, and digest-bound reviewed export without telemetry. The full gate passes 270 Rust library tests with five intentional child-helper ignores, strict Clippy, bindings/harness, 44 frontend tests, documentation, and renderer checks; environment-dependent mount combinations remain documented.

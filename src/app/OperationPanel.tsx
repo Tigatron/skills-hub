@@ -1,4 +1,5 @@
 import { useMutation } from '@tanstack/react-query';
+import type { RefObject } from 'react';
 
 import type { AnyOperationView } from '../bindings';
 import { api, operationOutcomeLabel, type ReviewedPlan } from '../lib/api';
@@ -20,6 +21,7 @@ export function OperationPanel({
   onExecute,
   onCancel,
   onClear,
+  focusReturnRef,
 }: {
   plan: ReviewedPlan | null;
   operation: AnyOperationView | null;
@@ -27,10 +29,19 @@ export function OperationPanel({
   onExecute: () => void;
   onCancel: () => void;
   onClear: () => void;
+  /** Element that should regain focus after dismiss/cancel/completion. */
+  focusReturnRef?: RefObject<HTMLElement | null>;
 }) {
   const exportPlan = useMutation({
     mutationFn: (operationId: string) => api.operationPlanExport({ operationId }),
   });
+
+  const restoreFocus = () => {
+    const target = focusReturnRef?.current;
+    if (target && typeof target.focus === 'function') {
+      target.focus();
+    }
+  };
 
   if (!plan && !operation) {
     return (
@@ -110,11 +121,23 @@ export function OperationPanel({
           </PrimaryButton>
         ) : null}
         {operation?.value.cancellationAllowed ? (
-          <DangerButton onPress={onCancel} isDisabled={busy}>
+          <DangerButton
+            onPress={() => {
+              onCancel();
+              restoreFocus();
+            }}
+            isDisabled={busy}
+          >
             Request cancel
           </DangerButton>
         ) : null}
-        <SecondaryButton onPress={onClear} isDisabled={busy}>
+        <SecondaryButton
+          onPress={() => {
+            onClear();
+            restoreFocus();
+          }}
+          isDisabled={busy}
+        >
           Dismiss
         </SecondaryButton>
       </div>

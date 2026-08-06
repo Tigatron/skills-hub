@@ -226,7 +226,7 @@ describe('LibraryPanel authoritative query rendering', () => {
     expect(screen.getByText(/managed · Universal global/)).toBeInTheDocument();
   });
 
-  it('propagates trimmed search and filter changes to the backend query', async () => {
+  it('propagates trimmed debounced search and filter changes to the backend query', async () => {
     vi.mocked(api.libraryList).mockResolvedValue(page([]));
     const user = userEvent.setup();
     renderPanel();
@@ -235,14 +235,27 @@ describe('LibraryPanel authoritative query rendering', () => {
     await user.type(screen.getByRole('textbox', { name: 'Filter library' }), '  finder  ');
     await user.selectOptions(screen.getByRole('combobox', { name: 'Library filter' }), 'conflicts');
 
-    await waitFor(() =>
-      expect(api.libraryList).toHaveBeenLastCalledWith({
-        offset: 0,
-        limit: 100,
-        search: 'finder',
-        filter: 'conflicts',
-      }),
+    await waitFor(
+      () =>
+        expect(api.libraryList).toHaveBeenLastCalledWith({
+          offset: 0,
+          limit: 100,
+          search: 'finder',
+          filter: 'conflicts',
+        }),
+      { timeout: 2_000 },
     );
+  });
+
+  it('exposes listbox/option selection semantics for assistive technology', async () => {
+    vi.mocked(api.libraryList).mockResolvedValue(page([item('external', 1)]));
+    const user = userEvent.setup();
+    renderPanel();
+    const option = await screen.findByRole('option', { name: /external skill 1/i });
+    expect(option).toHaveAttribute('aria-selected', 'false');
+    await user.click(option);
+    expect(option).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('listbox', { name: 'Library items' })).toBeInTheDocument();
   });
 
   it('virtualizes a large page into a bounded subset on a virtual canvas', async () => {

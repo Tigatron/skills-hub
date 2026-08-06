@@ -279,7 +279,8 @@
   border-color: var(--line-strong);
 }
 
-.listItem[data-focus-visible] {
+.listItem[data-focus-visible],
+.listItem:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
@@ -303,14 +304,21 @@
 .statusPill {
   display: inline-flex;
   align-items: center;
+  gap: 4px;
   min-height: 18px;
   padding: 0 7px;
   border: 1px solid var(--line-subtle);
   border-radius: 999px;
   color: var(--ink-soft);
-  font-size: 10px;
+  font-size: 0.625rem;
   font-weight: 620;
   white-space: nowrap;
+}
+
+.statusIcon {
+  font-size: 0.7em;
+  font-weight: 760;
+  line-height: 1;
 }
 
 .statusPill[data-tone='success'] {
@@ -472,14 +480,14 @@
 .pathAction {
   padding: 0;
   border: 0;
-  color: var(--accent-strong);
+  color: var(--accent-ink);
   background: transparent;
   font: inherit;
   cursor: pointer;
 }
 
 .pathAction[data-focus-visible] {
-  outline: 2px solid var(--accent-strong);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 
@@ -613,7 +621,53 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .loadingBlock span {
-    animation: none;
+  .loadingBlock span,
+  .primaryButton,
+  .secondaryButton,
+  .dangerButton,
+  .navButton,
+  .listItem {
+    animation: none !important;
+    transition: none !important;
   }
+}
+
+@media (prefers-contrast: more) {
+  .listItem,
+  .statusPill,
+  .secondaryButton,
+  .navButton {
+    border-width: 2px;
+  }
+
+  .statusPill[data-tone='success'],
+  .statusPill[data-tone='pending'],
+  .statusPill[data-tone='danger'] {
+    border-color: currentColor;
+  }
+
+  .listItem[data-selected='true'],
+  .navButton[data-selected='true'] {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 1px;
+  }
+}
+
+/* Prefer rem so macOS text scaling / browser zoom keeps hierarchy. */
+.shell {
+  font-size: 100%;
+}
+
+.listItemTitle {
+  font-size: 0.75rem;
+}
+
+.listItemMeta {
+  font-size: 0.625rem;
+}
+
+.primaryButton,
+.secondaryButton,
+.dangerButton {
+  font-size: 0.6875rem;
 }

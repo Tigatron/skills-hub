@@ -62,5 +62,18 @@
   :root {
     --line-subtle: var(--line-strong);
     --ink-muted: var(--ink-soft);
+    --focus-ring: oklch(40% 0.18 245);
+    --state-success: oklch(42% 0.14 152);
+    --state-pending: oklch(48% 0.12 75);
+    --state-danger: oklch(42% 0.18 28);
+  }
+}
+
+@media (prefers-contrast: more) and (prefers-color-scheme: dark) {
+  :root {
+    --focus-ring: oklch(82% 0.14 240);
+    --state-success: oklch(78% 0.14 152);
+    --state-pending: oklch(82% 0.12 78);
+    --state-danger: oklch(78% 0.16 28);
   }
 }

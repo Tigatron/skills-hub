@@ -360,16 +360,28 @@ impl ScanningService {
                 maximum: MAXIMUM_LIBRARY_PAGE_SIZE,
             });
         }
-        let (records, skills, deployments) = self
-            .run_repository(|repositories| {
+        let search = query
+            .search
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned);
+        let (records, skills, deployment_counts) = self
+            .run_repository(move |repositories| {
+                let needle = search.as_deref();
                 Ok((
-                    repositories.external_observations()?,
-                    repositories.skills()?,
-                    repositories.all_deployments()?,
+                    repositories.external_observations_matching(needle)?,
+                    repositories.active_skills_matching(needle)?,
+                    repositories.active_deployment_counts()?,
                 ))
             })
             .await?;
-        Ok(build_library_page(records, skills, &deployments, &query))
+        Ok(build_library_page(
+            records,
+            skills,
+            &deployment_counts,
+            &query,
+        ))
     }
 
     async fn load_managed_links(
@@ -1036,7 +1048,7 @@ struct ExternalGroup {
 fn build_library_page(
     records: Vec<ExternalObservationRecord>,
     skills: Vec<crate::persistence::SkillRecord>,
-    deployments: &[crate::persistence::DeploymentRecord],
+    deployment_counts: &BTreeMap<crate::domain::SkillId, u32>,
     query: &LibraryQuery,
 ) -> LibraryPage {
     let mut grouped = BTreeMap::<ExternalGroupKey, ExternalGroup>::new();
@@ -1083,7 +1095,7 @@ fn build_library_page(
         .filter(|item| matches_filter(item, query.filter))
         .collect::<Vec<_>>();
     items.extend(
-        managed_library_items(skills, deployments)
+        managed_library_items(skills, deployment_counts)
             .into_iter()
             .filter(|item| matches_search(item, search.as_deref()))
             .filter(|item| matches_filter(item, query.filter)),
@@ -1112,16 +1124,19 @@ fn build_library_page(
 
 fn managed_library_items(
     skills: Vec<crate::persistence::SkillRecord>,
-    deployments: &[crate::persistence::DeploymentRecord],
+    deployment_counts: &BTreeMap<crate::domain::SkillId, u32>,
 ) -> Vec<LibraryItem> {
     skills
         .into_iter()
         .filter(|skill| skill.lifecycle == crate::domain::SkillLifecycle::Active)
         .map(|skill| {
-            let active_deployments = deployments
-                .iter()
-                .filter(|deployment| deployment.skill_id == skill.id && deployment.active)
-                .count();
+            let active_deployments = usize::try_from(
+                deployment_counts
+                    .get(&skill.id)
+                    .copied()
+                    .unwrap_or_default(),
+            )
+            .unwrap_or(usize::MAX);
             let managed = active_deployments > 0;
             LibraryItem {
                 id: format!("skill:{}", skill.id),
@@ -1400,8 +1415,9 @@ mod tests {
             filter: LibraryFilter::All,
         };
 
-        let first = build_library_page(records, Vec::new(), &[], &query());
-        let second = build_library_page(reversed, Vec::new(), &[], &query());
+        let empty_counts = BTreeMap::new();
+        let first = build_library_page(records, Vec::new(), &empty_counts, &query());
+        let second = build_library_page(reversed, Vec::new(), &empty_counts, &query());
 
         assert_eq!(first.total, 4);
         assert_eq!(
@@ -1441,7 +1457,7 @@ mod tests {
         let page = build_library_page(
             records,
             Vec::new(),
-            &[],
+            &BTreeMap::new(),
             &LibraryQuery {
                 offset: 500,
                 limit: 25,
@@ -1670,7 +1686,7 @@ mod tests {
     fn repository_fixture_can_open_at_current_schema() {
         let directory = tempfile::tempdir().unwrap();
         let database = DbExecutor::open(directory.path().join("index.sqlite")).unwrap();
-        assert_eq!(database.settings().unwrap().schema_version, 5);
+        assert_eq!(database.settings().unwrap().schema_version, 6);
     }
 
     #[test]

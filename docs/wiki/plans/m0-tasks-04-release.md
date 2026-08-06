@@ -75,7 +75,7 @@ The combination space is large; prioritize one full boundary sweep per operation
 
 | Field | Value |
 | --- | --- |
-| Status | Planned |
+| Status | Complete (2026-08-06) |
 | Dependencies | M0-014, M0-015 |
 | PRD coverage | M0 acceptance criterion 12; PRD §17 performance/reliability targets and §18 accessibility requirements |
 | Design | [Testing and acceptance](../quality/testing-and-acceptance.md), [Tauri/UI contract](../interfaces/tauri-and-ui-state.md) |
@@ -112,9 +112,38 @@ This task tunes and verifies; feature behavior and mutation semantics do not cha
 - Keyboard flow and focus-management integration tests.
 - Static accessibility checks in component tests; the manual checklist remains a documented artifact.
 
+## Implementation evidence
+
+- **Reference-scale fixture** (`src-tauri/src/application/reference_scale.rs`): generates 1,000 active Vault Skills, 5,000 observations, 4,000 active deployments, 200 projects across 4 Workspace Roots, and 20 targets under a disposable Vault. Inventory assertions and generation stay under two minutes.
+- **Query/index tuning**: schema migration `0006_library_perf_indexes` adds external-observation, active-skill, and active-deployment indexes. `library_list` loads active skills + deployment counts (not full deployment rows) and SQL-prefilters by search needle before in-process grouping.
+- **UI interactivity**: Library search is debounced (160 ms); Library remains virtualized (page size 100); StatusPill carries text + tone icon; list rows use native `role=option`/`aria-selected` under listbox parents; Operation dismiss/cancel restores focus via `focusReturnRef`; reduced-motion and increased-contrast CSS cover shell controls; rem-based type scale and 900×600 floor retained.
+- **Automated a11y/keyboard**: `keyboard-workflow.test.tsx` covers scan → takeover → plan → deploy, Deployments verify/undeploy, and Trash restore; component tests cover StatusPill, LoadingBlock live region, listbox selection, and focus return after dismiss.
+- **Performance harness**: `scripts/perf-harness.sh` runs `reference_scale_ci_gates_and_optional_evidence`. Debug builds use smoke bounds; **release** enforces PRD gates. Evidence JSON: [m0-016-perf.json](../quality/evidence/m0-016-perf.json).
+
+### Release measurement (2026-08-06)
+
+| Field | Value |
+| --- | --- |
+| Hardware | Apple M4 / 24 GB RAM |
+| OS | macOS 26.6 |
+| Build | `cargo test --release` (library) |
+| Dataset | 1000 skills, 5000 observations (+ scan churn), 4000 active deployments, 200 projects / 4 roots, 20+ targets |
+| Samples | 11 per gate (p50/p95/max; gate on p95) |
+
+| Gate | p50 | p95 | Limit | Result |
+| --- | --- | --- | --- | --- |
+| Library search | 2.4 ms | 2.5 ms | 100 ms | pass |
+| Warm global scan | 20.4 ms | 27.1 ms | 1000 ms | pass |
+| Workspace first result | 0.06 ms | 0.13 ms | 2000 ms | pass |
+| Plan generation | 46.5 ms | 52.9 ms | 500 ms | pass |
+| Launch → usable Library | — | — | 1500 ms | **env-gated** — requires packaged `.app`; method + template in [manual a11y checklist](../quality/evidence/m0-016-manual-a11y.md); scheduled for M0-017 packaged smoke |
+
+- **Manual checklist artifact**: [m0-016-manual-a11y.md](../quality/evidence/m0-016-manual-a11y.md) — template plus recorded automated/pass and remaining VoiceOver/native rows for packaging smoke.
+- Plan generation still hashes the tiny fixture working tree for drift detection; content is single-file `SKILL.md` so hashing is not the dominant cost. No mutation semantics changed.
+
 ## Risks and recovery
 
-Measurement flakiness invites gate erosion; fix the harness or document variance rather than widening thresholds. If a gate cannot be met without a schema or read-model change, update the owning design page and its tests instead of patching around the measurement.
+Measurement flakiness invites gate erosion; fix the harness or document variance rather than widening thresholds. If a gate cannot be met without a schema or read-model change, update the owning design page and its tests instead of patching around the measurement. Launch timing remains honestly deferred until a packaged artifact exists.
 
 # M0-017 — M0 acceptance verification and packaging
 

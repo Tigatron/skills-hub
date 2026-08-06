@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Button } from 'react-aria-components';
 
 import type {
   AnyOperationView,
@@ -42,19 +41,27 @@ export function LibraryPanel() {
   const [manualSkillId, setManualSkillId] = useState('');
   const [deleteConfirmation, setDeleteConfirmation] = useState('');
   const [previewPath, setPreviewPath] = useState('SKILL.md');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const scanButtonRef = useRef<HTMLButtonElement | null>(null);
+  const detailActionsRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const handle = window.setTimeout(() => setDebouncedSearch(search.trim()), 160);
+    return () => window.clearTimeout(handle);
+  }, [search]);
 
   const library = useQuery({
-    queryKey: queryKeys.library({ search, filter, offset }),
+    queryKey: queryKeys.library({ search: debouncedSearch, filter, offset }),
     queryFn: () =>
       api.libraryList({
         offset,
         limit: PAGE_SIZE,
-        search: search.trim() ? search.trim() : null,
+        search: debouncedSearch ? debouncedSearch : null,
         filter,
       }),
   });
 
-  useEffect(() => setOffset(0), [search, filter]);
+  useEffect(() => setOffset(0), [debouncedSearch, filter]);
 
   const selected = useMemo(
     () => library.data?.items.find((item) => item.id === selectedId) ?? null,
@@ -274,7 +281,11 @@ export function LibraryPanel() {
           title="Library"
           description="Observed Skills from configured sources. Ownership and validation come only from Rust."
           actions={
-            <PrimaryButton onPress={() => startScan.mutate()} isDisabled={startScan.isPending}>
+            <PrimaryButton
+              ref={scanButtonRef}
+              onPress={() => startScan.mutate()}
+              isDisabled={startScan.isPending}
+            >
               {startScan.isPending ? 'Starting scan…' : 'Scan Universal global'}
             </PrimaryButton>
           }
@@ -337,23 +348,28 @@ export function LibraryPanel() {
             className={styles.virtualList}
             role="listbox"
             aria-label="Library items"
+            aria-multiselectable={false}
             data-testid="library-virtual-list"
           >
             <div className={styles.virtualCanvas} style={{ height: rowVirtualizer.getTotalSize() }}>
               {rowVirtualizer.getVirtualItems().map((virtualRow) => {
                 const item = library.data!.items[virtualRow.index]!;
                 const locationCount = item.locations.length + (item.workingLocation ? 1 : 0);
+                const isSelected = selectedId === item.id;
                 return (
-                  <Button
+                  <button
                     key={item.id}
+                    type="button"
                     ref={rowVirtualizer.measureElement}
                     data-index={virtualRow.index}
-                    className={styles.listItem!}
-                    onPress={() => {
+                    className={styles.listItem}
+                    role="option"
+                    aria-selected={isSelected}
+                    onClick={() => {
                       setSelectedId(item.id);
                       if (item.skillId) setManualSkillId(item.skillId);
                     }}
-                    data-selected={selectedId === item.id}
+                    data-selected={isSelected}
                     style={{
                       position: 'absolute',
                       top: 0,
@@ -378,7 +394,7 @@ export function LibraryPanel() {
                       conflicts {item.duplicateSummary.nameConflicts} · probable matches{' '}
                       {item.duplicateSummary.probableDuplicatesOrRenames}
                     </div>
-                  </Button>
+                  </button>
                 );
               })}
             </div>
@@ -516,7 +532,7 @@ export function LibraryPanel() {
             </div>
           ) : null}
 
-          <div className={styles.stack}>
+          <div className={styles.stack} ref={detailActionsRef}>
             <div className={styles.inlineFields}>
               <input
                 className={styles.textInput}
@@ -585,6 +601,7 @@ export function LibraryPanel() {
               setPlan(null);
               setOperation(null);
             }}
+            focusReturnRef={detailActionsRef}
           />
         </div>
       </section>

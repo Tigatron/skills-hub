@@ -1,6 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
-import { Button } from 'react-aria-components';
 
 import type {
   PlanExportView,
@@ -135,13 +134,21 @@ export function TrashPanel() {
             />
           ) : null}
           {entries.data?.length ? (
-            <div className={styles.list} role="list" aria-label="Trashed Skills">
+            <div
+              className={styles.list}
+              role="listbox"
+              aria-label="Trashed Skills"
+              aria-multiselectable={false}
+            >
               {entries.data.map((entry) => (
-                <Button
+                <button
                   key={entry.entryId}
-                  className={styles.listItem!}
+                  type="button"
+                  className={styles.listItem}
+                  role="option"
+                  aria-selected={entry.entryId === selectedId}
                   data-selected={entry.entryId === selectedId}
-                  onPress={() => setSelectedId(entry.entryId)}
+                  onClick={() => setSelectedId(entry.entryId)}
                 >
                   <span className={styles.itemTop}>
                     <strong>{entry.displayName}</strong>
@@ -153,7 +160,7 @@ export function TrashPanel() {
                   <span className={styles.path} title={entry.originalWorkingPath}>
                     {entry.originalWorkingPath}
                   </span>
-                </Button>
+                </button>
               ))}
             </div>
           ) : null}

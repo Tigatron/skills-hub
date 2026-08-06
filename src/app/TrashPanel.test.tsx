@@ -118,7 +118,7 @@ describe('TrashPanel', () => {
     await user.click(await screen.findByRole('button', { name: 'Plan restore' }));
     await user.click(await screen.findByRole('button', { name: 'Execute reviewed restore' }));
     expect(screen.getAllByText('Example Skill').length).toBeGreaterThan(0);
-    expect(screen.getByRole('button', { name: /Example Skill/ })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /Example Skill/ })).toBeInTheDocument();
     resolveExecution({
       operationId: 'operation-1',
       outcome: 'succeeded',

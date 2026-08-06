@@ -26,6 +26,8 @@
     "test:frontend": "vitest run",
     "test:frontend:watch": "vitest",
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml --all-features",
+    "test:perf": "bash scripts/perf-harness.sh",
+    "test:perf:release": "bash scripts/perf-harness.sh --release",
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm bindings:check && pnpm docs:check && pnpm build:renderer"
   },
   "dependencies": {

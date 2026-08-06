@@ -121,4 +121,32 @@ describe('Operation Plan export', () => {
     expect(await screen.findByText(/destinationRelativePath/)).toBeInTheDocument();
     expect(execute).toBeEnabled();
   });
+
+  it('returns focus to the provided trigger after dismiss', async () => {
+    const user = userEvent.setup();
+    const trigger = document.createElement('button');
+    trigger.textContent = 'Plan deploy';
+    document.body.appendChild(trigger);
+    const focusReturnRef = { current: trigger as HTMLElement };
+    const onClear = vi.fn();
+    const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <OperationPanel
+          plan={plan}
+          operation={null}
+          busy={false}
+          onExecute={() => undefined}
+          onCancel={() => undefined}
+          onClear={onClear}
+          focusReturnRef={focusReturnRef}
+        />
+      </QueryClientProvider>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Dismiss' }));
+    expect(onClear).toHaveBeenCalledOnce();
+    expect(trigger).toHaveFocus();
+    trigger.remove();
+  });
 });

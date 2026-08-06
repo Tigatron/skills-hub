@@ -289,12 +289,18 @@ type ViewProps = {
 };
 
 function Health({ item }: { item: DeploymentHealthView }) {
-  return (
-    <StatusPill tone="neutral">
-      <span className={styles.srOnly}>Health: </span>
-      {item.health}
-    </StatusPill>
-  );
+  const tone =
+    item.health === 'clean'
+      ? 'success'
+      : item.health === 'unverified' || item.health === 'vault_ahead'
+        ? 'pending'
+        : item.health === 'missing_target' ||
+            item.health === 'broken_link' ||
+            item.health === 'conflict' ||
+            item.health === 'target_modified'
+          ? 'danger'
+          : 'neutral';
+  return <StatusPill tone={tone}>{item.health}</StatusPill>;
 }
 
 function ActionBar({
