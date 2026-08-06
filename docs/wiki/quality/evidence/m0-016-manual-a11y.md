@@ -64,12 +64,12 @@ PRD gate: warm launch < 1.5 s at reference scale.
 
 | Field | Value |
 | --- | --- |
-| Method | Packaged release `.app` cold start with pre-built reference Vault; stopwatch or Instruments time-to-first-Library paint |
-| App path |  |
-| Samples (ms) |  |
-| p50 / p95 |  |
-| Pass |  |
-| Notes | Not runnable in pure unit CI. Set `SKILLS_HUB_PERF_LAUNCH=1` and `SKILLS_HUB_PERF_APP` when a packaged binary exists (M0-017). |
+| Method | Packaged release `.app` process-start under disposable HOME (Library paint still needs GUI/Instruments) |
+| App path | `src-tauri/target/release/bundle/macos/Skills Hub.app` (M0-017) |
+| Samples (ms) | See [m0-017-packaged-smoke.json](m0-017-packaged-smoke.json) (~80–90 ms process-start × 5) |
+| p50 / p95 | process-start proxy; not Library-paint |
+| Pass | **proxy only** — process-start ≪ 1.5 s; full paint residual documented in M0-017 |
+| Notes | `SKILLS_HUB_PERF_LAUNCH=1 bash scripts/m0-packaged-smoke.sh`. Do not treat process-start as painted-Library evidence. |
 
 ## Recorded results (2026-08-06)
 

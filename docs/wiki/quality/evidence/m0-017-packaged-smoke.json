@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "task": "M0-017",
+  "stamp": "2026-08-06T02:49:17Z",
+  "appPath": "/Users/terrylan/Development/apps/skills-hub/src-tauri/target/release/bundle/macos/Skills Hub.app",
+  "identity": {
+    "productName": "Skills Hub",
+    "bundleId": "com.terrylan.skillshub",
+    "version": "0.1.0",
+    "minimumSystemVersion": "14.0"
+  },
+  "binary": "/Users/terrylan/Development/apps/skills-hub/src-tauri/target/release/bundle/macos/Skills Hub.app/Contents/MacOS/skills-hub: Mach-O 64-bit executable arm64",
+  "codesign": "Executable=/Users/terrylan/Development/apps/skills-hub/src-tauri/target/release/bundle/macos/Skills Hub.app/Contents/MacOS/skills-hub;Identifier=com.terrylan.skillshub;Format=app bundle with Mach-O thin (arm64);CodeDirectory v=20500 size=27223 flags=0x10002(adhoc,runtime) hashes=844+3 location=embedded;VersionPlatform=1;VersionMin=917504;VersionSDK=1705216;Hash type=sha256 size=32;CandidateCDHash sha256=54cbed7dbd97c4d6342691c8b701565c0afbd3dc;CandidateCDHashFull sha256=54cbed7dbd97c4d6342691c8b701565c0afbd3dc4055586f10ee4d3c7a445fa1;Hash choices=sha256;CMSDigest=54cbed7dbd97c4d6342691c8b701565c0afbd3dc4055586f10ee4d3c7a445fa1;CMSDigestType=2;Executable Segment base=0;Executable Segment limit=12304384;Executable Segment flags=0x1;Page size=16384;CDHash=54cbed7dbd97c4d6342691c8b701565c0afbd3dc;Signature=adhoc;Info.plist entries=16;",
+  "firstRunLaunchOk": true,
+  "thinSliceStatus": 0,
+  "launchSamplesMs": [
+    86,
+    88,
+    81,
+    85,
+    90
+  ],
+  "launchP50Ms": 86,
+  "launchP95Ms": 89,
+  "launchGate": {
+    "prdMs": 1500,
+    "method": "process-start under disposable HOME (Library paint requires GUI automation)",
+    "result": "proxy-pass-process-start"
+  },
+  "defaultVaultStory": "~/Library/Application Support/Skills Hub/Vault under the process HOME"
+}

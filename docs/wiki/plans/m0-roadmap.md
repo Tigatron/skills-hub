@@ -2,7 +2,7 @@
 type: Implementation Plan
 title: M0 Delivery Roadmap
 description: Defines the M0 dependency graph, vertical thin-slice gate, parallel work, and release Definition of Done.
-status: planned
+status: implemented
 tags: [skills-hub, m0, roadmap]
 timestamp: 2026-07-23T00:00:00Z
 ---
@@ -45,8 +45,8 @@ M0-003 + M0-008 ──────▶ M0-012 ✓ Vault lifecycle
 M0-008 + M0-012 ──────▶ M0-013 Trash + restore + undo ✓
 M0-009..M0-013 ───────▶ M0-014 Complete M0 UI ✓
 M0-008..M0-014 ───────▶ M0-015 Filesystem/reliability hardening ✓
-M0-014 + M0-015 ──────▶ M0-016 Accessibility + performance
-M0-016 ────────────────▶ M0-017 Acceptance + packaging
+M0-014 + M0-015 ──────▶ M0-016 Accessibility + performance ✓
+M0-016 ────────────────▶ M0-017 Acceptance + packaging ✓
 ```
 
 # Delivery phases
@@ -79,7 +79,7 @@ Add authorized Workspace discovery, watcher reconciliation, all six adapters, cu
 
 Stress path safety, crashes, permissions, stale plans, failure compensation, accessibility, reference-scale performance, and all 12 PRD acceptance criteria. Package a reproducible macOS release candidate and document any manual/platform verification that cannot be automated.
 
-`M0-015` is complete: the consolidated fault/cleanup gate, local provenance recovery, safe error envelopes, and bounded local diagnostics pass the repository-wide check. `M0-016` is complete: reference-scale fixtures, release percentile evidence, keyboard/a11y automation, and the manual VoiceOver template are recorded; packaged launch timing and live VoiceOver sign-off remain packaging-smoke items for `M0-017`.
+`M0-015` is complete: the consolidated fault/cleanup gate, local provenance recovery, safe error envelopes, and bounded local diagnostics pass the repository-wide check. `M0-016` is complete: reference-scale fixtures, release percentile evidence, keyboard/a11y automation, and the manual VoiceOver template are recorded. `M0-017` is complete: 12/12 acceptance criteria with filesystem evidence, network-disabled posture, ad-hoc Apple Silicon `.app`/DMG package, disposable-HOME packaged smoke, release notes, and honest residuals for Library-paint timing and live VoiceOver.
 
 # Parallelization
 
@@ -104,14 +104,14 @@ Avoid parallel code-writing inside the same transaction executor or schema migra
 
 # M0 Definition of Done
 
-- Every requirement `VLT-01..08`, `SCN-01..09`, `IMP-01..08`, `DPL-01..12`, and `DEL-01..06` has implementation and verification evidence.
-- All 12 M0 acceptance criteria pass on macOS.
-- Scans and blocked/canceled plans demonstrate zero mutation.
-- Fault injection demonstrates full rollback or explicit retained recovery state.
-- Rust remains authoritative across generated frontend contracts.
-- Core workflows work with network access disabled and no account/telemetry.
-- Wiki concept statuses and [traceability](../traceability.md) match implementation reality.
-- M1/M2 exclusions remain absent from M0 navigation and code paths except documented extension seams.
+- Every requirement `VLT-01..08`, `SCN-01..09`, `IMP-01..08`, `DPL-01..12`, and `DEL-01..06` has implementation and verification evidence. **Met** — [traceability](../traceability.md) + task evidence through M0-017.
+- All 12 M0 acceptance criteria pass on macOS. **Met** — [m0-017-acceptance.md](../quality/evidence/m0-017-acceptance.md).
+- Scans and blocked/canceled plans demonstrate zero mutation. **Met** — scan tree fingerprints + collision no-write in acceptance harness; M0-004/011/015 suites.
+- Fault injection demonstrates full rollback or explicit retained recovery state. **Met** — M0-005/008/015 failpoint matrices re-run under M0-017 filters.
+- Rust remains authoritative across generated frontend contracts. **Met** — bindings gate in `pnpm check`.
+- Core workflows work with network access disabled and no account/telemetry. **Met** — no HTTP client deps; acceptance under `local-no-client-deps`.
+- Wiki concept statuses and [traceability](../traceability.md) match implementation reality. **Met** — M0-017 closeout.
+- M1/M2 exclusions remain absent from M0 navigation and code paths except documented extension seams. **Met** — [release notes](../quality/evidence/m0-017-release-notes.md).
 
 # Decisions to verify during implementation
 

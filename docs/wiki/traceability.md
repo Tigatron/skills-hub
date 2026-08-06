@@ -83,7 +83,7 @@ Every mutation-bearing requirement additionally passes the consolidated hardenin
 
 # M0 acceptance criteria mapping
 
-The evidence definition for each criterion is owned by [testing and acceptance](quality/testing-and-acceptance.md); [M0-017](plans/m0-tasks-04-release.md) executes the full sweep on the packaged build.
+The evidence definition for each criterion is owned by [testing and acceptance](quality/testing-and-acceptance.md). [M0-017](plans/m0-tasks-04-release.md) executed the full sweep; recorded results live in [m0-017-acceptance.md](quality/evidence/m0-017-acceptance.md) with package/smoke evidence alongside.
 
 | #   | PRD §19.1 criterion                                            | Requirements                           | Primary tasks                                                                                                                |
 | --- | -------------------------------------------------------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
@@ -102,9 +102,9 @@ The evidence definition for each criterion is owned by [testing and acceptance](
 
 # Coverage summary
 
-- All 43 M0 requirements (VLT-01..08, SCN-01..09, IMP-01..08, DPL-01..12, DEL-01..06) have at least one owning design concept, implementing task, and verification owner above.
-- All 12 PRD §19.1 acceptance criteria map to primary tasks and are finally verified in [M0-017](plans/m0-tasks-04-release.md).
-- Every Task ID M0-001..017 appears in exactly one task page; `M0-001` carries no single requirement row because it delivers the shell and harness all rows depend on.
+- All 43 M0 requirements (VLT-01..08, SCN-01..09, IMP-01..08, DPL-01..12, DEL-01..06) have at least one owning design concept, implementing task, and verification owner above. Owning tasks M0-002–M0-016 record implementation evidence; M0-017 re-verifies cross-cutting acceptance criteria on this machine.
+- All 12 PRD §19.1 acceptance criteria map to primary tasks and are verified in [M0-017 acceptance evidence](quality/evidence/m0-017-acceptance.md) (12/12 pass, 2026-08-06).
+- Every Task ID M0-001..017 appears in exactly one task page; `M0-001` carries no single requirement row because it delivers the shell and harness all rows depend on. `M0-017` is Complete.
 
 # Maintenance rules
 

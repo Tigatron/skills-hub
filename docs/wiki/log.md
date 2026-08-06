@@ -2,6 +2,8 @@
 
 ## 2026-08-06
 
+- **Release gate**: Completed `M0-017` acceptance verification and packaging. Added headless acceptance harness (`m0_acceptance`), `scripts/m0-package.sh`, `scripts/m0-acceptance.sh`, and `scripts/m0-packaged-smoke.sh`. Executed 12/12 PRD §19.1 criteria with disposable-HOME filesystem evidence and network-disabled posture; produced ad-hoc Apple Silicon `Skills Hub.app` and DMG (`com.terrylan.skillshub`, macOS 14+, default Vault path); recorded packaged smoke, release notes, and honest residuals for Library-paint timing (process-start proxy) and live VoiceOver. Roadmap Definition of Done marked met line-by-line; M1 surfaces remain absent.
+
 - **Release gate**: Completed `M0-016` accessibility and performance. Added a committed reference-scale fixture generator (1k skills / 5k observations / 4k deployments / 200 projects / 4 workspace roots / 20 targets), schema-v6 Library indexes, SQL-prefiltered Library search with active-skill and deployment-count reads, debounced virtualized Library UI, listbox/option semantics, text-plus-icon status pills, focus return after Operation dismiss, reduced-motion and increased-contrast CSS, keyboard workflow tests, and a release percentile harness. Release evidence on Apple M4 / macOS 26.6 passes Library search (p95 2.5 ms), warm global scan (27 ms), Workspace first result (0.13 ms), and plan generation (53 ms); launch-to-Library and live VoiceOver remain documented for packaged M0-017 smoke.
 
 ## 2026-08-05

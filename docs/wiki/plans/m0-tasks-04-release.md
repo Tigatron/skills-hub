@@ -2,7 +2,7 @@
 type: Implementation Plan
 title: M0 Tasks 015–017 — Release Gates
 description: Executable tasks for filesystem/reliability hardening, accessibility and performance gates, and M0 acceptance plus packaging.
-status: planned
+status: implemented
 tags: [skills-hub, m0, tasks, release]
 requirements: [IMP-08, SCN-04, IMP-04, IMP-06, DPL-06, DPL-07, DPL-08, DEL-04, DEL-06]
 timestamp: 2026-07-23T00:00:00Z
@@ -149,7 +149,7 @@ Measurement flakiness invites gate erosion; fix the harness or document variance
 
 | Field | Value |
 | --- | --- |
-| Status | Planned |
+| Status | Complete (2026-08-06) |
 | Dependencies | M0-016 |
 | PRD coverage | All 12 PRD §19.1 acceptance criteria; M0 Definition of Done sweep across VLT-01..08, SCN-01..09, IMP-01..08, DPL-01..12, DEL-01..06 |
 | Design | [M0 roadmap](m0-roadmap.md), [Testing and acceptance](../quality/testing-and-acceptance.md), [Traceability](../traceability.md) |
@@ -185,6 +185,16 @@ This task ships evidence and artifacts. Product code changes are limited to rele
 
 - The full CI gate set from the quality plan, run against the release build.
 - A packaged-app smoke script for first run and the thin slice on a disposable HOME.
+
+## Implementation evidence
+
+- **Acceptance harness** (`src-tauri/src/application/m0_acceptance.rs`): disposable HOME default Vault, six-adapter no-mutation scan with tree fingerprints, Workspace ignore + symlink cycle, digest same-name cases, takeover source byte compare, symlink + Managed Copy deploy, collision no-write, drift/broken verify, undeploy with Vault preserved, Activity outcomes. JSON: [m0-017-acceptance.json](../quality/evidence/m0-017-acceptance.json). Matrix: [m0-017-acceptance.md](../quality/evidence/m0-017-acceptance.md).
+- **Focused suite filters** (via `scripts/m0-acceptance.sh`): commit failpoint rollback matrices; Trash permanent-delete/restore distinctness; same-name coexist; keyboard-workflow vitest.
+- **Network-disabled posture**: no HTTP client crates in product `Cargo.toml` (contract test); harness under `SKILLS_HUB_NETWORK_MODE=local-no-client-deps`; optional `sandbox-exec` wrap; no account/telemetry.
+- **Package** (`scripts/m0-package.sh` → `pnpm build`): Apple Silicon `.app` + `.dmg`, ad-hoc signing (`-`), identity `Skills Hub` / `com.terrylan.skillshub` / macOS 14.0 / default Vault path story. Evidence: [m0-017-package-build.json](../quality/evidence/m0-017-package-build.json).
+- **Packaged smoke** (`scripts/m0-packaged-smoke.sh`): disposable HOME process launch + headless thin-slice. Launch process-start p95 ~90 ms on M4 (proxy for Library paint). [m0-017-packaged-smoke.md](../quality/evidence/m0-017-packaged-smoke.md).
+- **Release notes / VO residual**: [m0-017-release-notes.md](../quality/evidence/m0-017-release-notes.md), [m0-017-voiceover.md](../quality/evidence/m0-017-voiceover.md).
+- **Honest residuals**: full Library-paint timing and live VoiceOver remain human/GUI-gated; ad-hoc package is not notarized; never advise disabling Gatekeeper.
 
 ## Risks and recovery
 

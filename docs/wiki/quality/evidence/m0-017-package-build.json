@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "task": "M0-017",
+  "stamp": "20260806T024236Z",
+  "buildStatus": 0,
+  "arch": "arm64",
+  "hardware": "Apple M4",
+  "os": "26.6",
+  "osBuild": "25G72",
+  "toolchains": {
+    "node": "v26.5.1",
+    "pnpm": "10.28.1",
+    "rustc": "rustc 1.89.0 (29483883e 2025-08-04)",
+    "cargo": "cargo 1.89.0 (c24e10642 2025-06-23)",
+    "tauriCli": "tauri-cli 2.11.4"
+  },
+  "commands": [
+    "pnpm build"
+  ],
+  "artifacts": {
+    "app": "/Users/terrylan/Development/apps/skills-hub/src-tauri/target/release/bundle/macos/Skills Hub.app",
+    "dmg": "/Users/terrylan/Development/apps/skills-hub/src-tauri/target/release/bundle/dmg/Skills Hub_0.1.0_aarch64.dmg",
+    "binary": "/Users/terrylan/Development/apps/skills-hub/src-tauri/target/release/bundle/macos/Skills Hub.app/Contents/MacOS/skills-hub"
+  },
+  "identity": {
+    "productName": "Skills Hub",
+    "bundleId": "com.terrylan.skillshub",
+    "version": "0.1.0",
+    "minimumSystemVersion": "14.0",
+    "defaultVaultPath": "~/Library/Application Support/Skills Hub/Vault",
+    "applicationSupportPath": "~/Library/Application Support/Skills Hub"
+  },
+  "signing": {
+    "configuredIdentity": "-",
+    "status": "ad-hoc",
+    "codesign": "Executable=/Users/terrylan/Development/apps/skills-hub/src-tauri/target/release/bundle/macos/Skills Hub.app/Contents/MacOS/skills-hub|Identifier=com.terrylan.skillshub|Format=app bundle with Mach-O thin (arm64)|CodeDirectory v=20500 size=27223 flags=0x10002(adhoc,runtime) hashes=844+3 location=embedded|VersionPlatform=1|VersionMin=917504|VersionSDK=1705216|Hash type=sha256 size=32|CandidateCDHash sha256=54cbed7dbd97c4d6342691c8b701565c0afbd3dc|CandidateCDHashFull sha256=54cbed7dbd97c4d6342691c8b701565c0afbd3dc4055586f10ee4d3c7a445fa1|Hash choices=sha256|CMSDigest=54cbed7dbd97c4d6342691c8b701565c0afbd3dc4055586f10ee4d3c7a445fa1|CMSDigestType=2|Executable Segment base=0|Executable Segment limit=12304384|Executable Segment flags=0x1|Page size=16384|CDHash=54cbed7dbd97c4d6342691c8b701565c0afbd3dc|Signature=adhoc|Info.plist entries=16|TeamIdentifier=not set|Runtime Version=26.5.0|Sealed Resources version=2 rules=13 files=1|Internal requirements count=0 size=12|",
+    "notarized": false,
+    "developerId": false,
+    "gatekeeperAdvice": "Do not disable Gatekeeper. Ad-hoc local builds are for developer machines and CI evidence only. Future seam: Developer ID + notarization."
+  },
+  "binary": {
+    "file": "/Users/terrylan/Development/apps/skills-hub/src-tauri/target/release/bundle/macos/Skills Hub.app/Contents/MacOS/skills-hub: Mach-O 64-bit executable arm64",
+    "universalBinary": false,
+    "intelRuntimeValidated": false
+  },
+  "notes": [
+    "M0 ships a native Apple Silicon package; x86_64 is source/compile-check only.",
+    "DMG may be absent if hdiutil packaging fails; .app alone is acceptable M0 evidence."
+  ]
+}

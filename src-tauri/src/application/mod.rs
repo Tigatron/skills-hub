@@ -4,6 +4,8 @@
 pub(crate) mod activity;
 pub(crate) mod deployment;
 #[cfg(test)]
+pub(crate) mod m0_acceptance;
+#[cfg(test)]
 pub(crate) mod reference_scale;
 pub(crate) mod scanning;
 pub(crate) mod takeover;

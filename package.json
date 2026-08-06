@@ -28,6 +28,9 @@
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml --all-features",
     "test:perf": "bash scripts/perf-harness.sh",
     "test:perf:release": "bash scripts/perf-harness.sh --release",
+    "package:mac": "bash scripts/m0-package.sh",
+    "test:acceptance": "bash scripts/m0-acceptance.sh",
+    "test:packaged-smoke": "bash scripts/m0-packaged-smoke.sh",
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm bindings:check && pnpm docs:check && pnpm build:renderer"
   },
   "dependencies": {
