@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "task": "M0-017",
-  "stamp": "2026-08-06T02:49:17Z",
+  "stamp": "2026-08-06T02:55:03Z",
   "appPath": "/Users/terrylan/Development/apps/skills-hub/src-tauri/target/release/bundle/macos/Skills Hub.app",
   "identity": {
     "productName": "Skills Hub",
@@ -14,14 +14,12 @@
   "firstRunLaunchOk": true,
   "thinSliceStatus": 0,
   "launchSamplesMs": [
-    86,
-    88,
-    81,
-    85,
-    90
+    83,
+    82,
+    96
   ],
-  "launchP50Ms": 86,
-  "launchP95Ms": 89,
+  "launchP50Ms": 83,
+  "launchP95Ms": 94,
   "launchGate": {
     "prdMs": 1500,
     "method": "process-start under disposable HOME (Library paint requires GUI automation)",

@@ -5,7 +5,7 @@ description: Disposable-HOME launch of the packaged .app plus headless thin-slic
 status: implemented
 tags: [skills-hub, m0, packaging, smoke]
 requirements: []
-timestamp: 2026-08-06T02:49:21Z
+timestamp: 2026-08-06T02:55:13Z
 ---
 
 # M0-017 packaged-app smoke
@@ -45,8 +45,8 @@ Result: **pass** (see acceptance JSON produced alongside this run).
 
 | Field | Value |
 | --- | --- |
-| Samples (ms) | [86, 88, 81, 85, 90] |
-| p50 / p95 | 86 / 89 |
+| Samples (ms) | [83, 82, 96] |
+| p50 / p95 | 83 / 94 |
 | PRD gate | < 1500 ms warm launch to usable Library |
 | Method | process-start under disposable HOME (Library paint requires GUI automation) |
 | Result | proxy-pass-process-start |

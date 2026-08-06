@@ -6,14 +6,14 @@
   "arch": "aarch64",
   "rustc": "1.89",
   "networkMode": "packaged-smoke-local",
-  "startedAtUnixMs": 1785984560075,
-  "durationMs": 1385,
+  "startedAtUnixMs": 1785984911868,
+  "durationMs": 1415,
   "criteria": [
     {
       "id": 1,
       "name": "Clean install creates or selects a Vault",
       "passed": true,
-      "evidence": "default Vault at /var/folders/1_/0mpt_xg93y7ghjqdhc3qsd780000gn/T/.tmp3HCrUy/home/Library/Application Support/Skills Hub/Vault vault.json=true settings=true root_matches=true",
+      "evidence": "default Vault at /var/folders/1_/0mpt_xg93y7ghjqdhc3qsd780000gn/T/.tmpsR5K6M/home/Library/Application Support/Skills Hub/Vault vault.json=true settings=true root_matches=true",
       "durationMs": 0
     },
     {
@@ -21,42 +21,42 @@
       "name": "All six adapters scanned without mutation",
       "passed": true,
       "evidence": "configured_roots=6 unique_fs_roots=5 observations=8 trees_unchanged=true",
-      "durationMs": 75
+      "durationMs": 82
     },
     {
       "id": 3,
       "name": "Workspace Root indexed with ignores and symlink cycles handled",
       "passed": true,
-      "evidence": "root_id=019fd4f9-ac48-71e3-a41e-8cf14d7c2b65 coverage=complete projects=1 skills=2 errors=0",
-      "durationMs": 5
+      "evidence": "root_id=019fd4ff-0abf-7923-9f43-951d97b89d1b coverage=complete projects=1 skills=2 errors=0",
+      "durationMs": 12
     },
     {
       "id": 4,
       "name": "Same-name same/different content distinguished",
       "passed": true,
       "evidence": "digest_same=true digest_diff_distinct=true",
-      "durationMs": 0
+      "durationMs": 1
     },
     {
       "id": 5,
       "name": "External Skill added to Vault, original untouched",
       "passed": true,
-      "evidence": "skill_id=019fd4f9-ac4f-79f3-b0bb-fcb63431fbcc working=/private/var/folders/1_/0mpt_xg93y7ghjqdhc3qsd780000gn/T/.tmp3HCrUy/home/Library/Application Support/Skills Hub/Vault/skills/019fd4f9-ac4f-79f3-b0bb-fcb63431fbcc/m017-thin-slice source_unchanged=true",
-      "durationMs": 220
+      "evidence": "skill_id=019fd4ff-0ace-7d83-a80a-82c0a1ce392f working=/private/var/folders/1_/0mpt_xg93y7ghjqdhc3qsd780000gn/T/.tmpsR5K6M/home/Library/Application Support/Skills Hub/Vault/skills/019fd4ff-0ace-7d83-a80a-82c0a1ce392f/m017-thin-slice source_unchanged=true",
+      "durationMs": 251
     },
     {
       "id": 6,
       "name": "Global symlink and Git-project Managed Copy deployment",
       "passed": true,
-      "evidence": "symlink=/private/var/folders/1_/0mpt_xg93y7ghjqdhc3qsd780000gn/T/.tmp3HCrUy/home/targets/global-skills/m017-thin-slice copy=/private/var/folders/1_/0mpt_xg93y7ghjqdhc3qsd780000gn/T/.tmp3HCrUy/home/targets/git-project-skills/m017-thin-slice link_is_symlink=true copy_is_dir=true",
-      "durationMs": 518
+      "evidence": "symlink=/private/var/folders/1_/0mpt_xg93y7ghjqdhc3qsd780000gn/T/.tmpsR5K6M/home/targets/global-skills/m017-thin-slice copy=/private/var/folders/1_/0mpt_xg93y7ghjqdhc3qsd780000gn/T/.tmpsR5K6M/home/targets/git-project-skills/m017-thin-slice link_is_symlink=true copy_is_dir=true",
+      "durationMs": 507
     },
     {
       "id": 7,
       "name": "Collision produces a plan/block and no writes before confirmation",
       "passed": true,
       "evidence": "plan_err=true tree_unchanged=true foreign=keep-me",
-      "durationMs": 9
+      "durationMs": 12
     },
     {
       "id": 8,
@@ -70,21 +70,21 @@
       "name": "Target edits and broken links appear in Deployments",
       "passed": true,
       "evidence": "copy_health=target_modified symlink_health=conflict copy_expl=The target changed while Vault still matches the last verified digest. link_expl=The managed link was retargeted away from the Vault.",
-      "durationMs": 2
+      "durationMs": 3
     },
     {
       "id": 10,
       "name": "Undeploy, Trash, restore, and permanent delete are distinct",
       "passed": true,
       "evidence": "copy_health_before=clean link_health_before=clean undeploy_copy_ok=true undeploy_link_ok=true vault_preserved=true; Trash/restore/delete: cargo filters in m0-acceptance.sh",
-      "durationMs": 502
+      "durationMs": 430
     },
     {
       "id": 11,
       "name": "Activity accurately reports operation outcome and recovery",
       "passed": true,
-      "evidence": "succeeded_count=17 sample=id=019fd4f9-b04e-7453-bd61-64ebcfb6069c kind=undeploy state=completed outcome=Some(\"succeeded\")",
-      "durationMs": 1
+      "evidence": "succeeded_count=17 sample=id=019fd4ff-0ebc-7080-b4fb-9471a62f6ab6 kind=undeploy state=completed outcome=Some(\"succeeded\")",
+      "durationMs": 0
     },
     {
       "id": 12,
